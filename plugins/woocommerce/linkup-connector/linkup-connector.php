@@ -1,135 +1,288 @@
 <?php
 /**
  * Plugin Name: LINKUP Connector
- * Description: Connects a WooCommerce store to LINKUP — partner coupons, referral tracking and signed order events.
- * Version: 0.1.0
+ * Description: מחבר את חנות ה-WooCommerce ל-LINKUP — קופונים לשותפים, מעקב הפניות ודיווח מכירות מאובטח.
+ * Version: 0.2.0
  * Requires at least: 6.4
- * Requires PHP: 8.1
+ * Requires PHP: 7.4
  * WC requires at least: 8.0
  * Text Domain: linkup-connector
  */
 
 defined('ABSPATH') || exit;
 
-const LINKUP_OPT = 'linkup_connector_settings';
-const LINKUP_COOKIE = 'linkup_ref';
-const LINKUP_COOKIE_DAYS = 30;
+define('LINKUP_VERSION', '0.2.0');
+define('LINKUP_ENDPOINT', 'https://ycuvcpslvkgndytubycn.supabase.co/functions/v1/woo');
+define('LINKUP_OPT_KEY', 'linkup_connection_key');
+define('LINKUP_OPT_LAST', 'linkup_last_sync');
+define('LINKUP_COOKIE', 'linkup_ref');
+define('LINKUP_COOKIE_DAYS', 30);
 
-/* HPOS (custom order tables) compatibility — we only use WC CRUD APIs. */
+/* HPOS compatibility — only WooCommerce CRUD APIs are used. */
 add_action('before_woocommerce_init', static function () {
-    if (class_exists(\Automattic\WooCommerce\Utilities\FeaturesUtil::class)) {
+    if (class_exists('\Automattic\WooCommerce\Utilities\FeaturesUtil')) {
         \Automattic\WooCommerce\Utilities\FeaturesUtil::declare_compatibility('custom_order_tables', __FILE__, true);
     }
 });
 
-function linkup_settings(): array {
-    $s = get_option(LINKUP_OPT, []);
-    return is_array($s) ? $s : [];
+/** Parse "lk_<32 hex>_<64 hex>" → [connection_id, secret] or null. */
+function linkup_credentials() {
+    $key = trim((string) get_option(LINKUP_OPT_KEY, ''));
+    if (!preg_match('/^lk_([0-9a-f]{32})_([0-9a-f]{64})$/', $key, $m)) {
+        return null;
+    }
+    return array($m[1], $m[2]);
 }
 
-/** Signature = hex(HMAC-SHA256(secret, "{timestamp}.{body}")) — must match apps/web signature.ts */
-function linkup_sign(string $body, int $ts, string $secret): string {
+/** Signature = hex(HMAC-SHA256(secret, "{timestamp}.{body}")) — verified by the LINKUP Edge Function. */
+function linkup_sign($body, $ts, $secret) {
     return hash_hmac('sha256', $ts . '.' . $body, $secret);
 }
 
-/* ---- Referral click capture: ?lku=CODE → first-party cookie ---- */
+/** Signed POST to LINKUP. Returns [http_code, decoded_body]. */
+function linkup_post(array $payload) {
+    $cred = linkup_credentials();
+    if (!$cred) {
+        return array(0, null);
+    }
+    $body = wp_json_encode($payload);
+    $ts = time();
+    $res = wp_remote_post(LINKUP_ENDPOINT, array(
+        'timeout' => 15,
+        'headers' => array(
+            'Content-Type'        => 'application/json',
+            'X-Linkup-Connection' => $cred[0],
+            'X-Linkup-Timestamp'  => (string) $ts,
+            'X-Linkup-Signature'  => linkup_sign($body, $ts, $cred[1]),
+        ),
+        'body'    => $body,
+    ));
+    if (is_wp_error($res)) {
+        return array(0, null);
+    }
+    return array((int) wp_remote_retrieve_response_code($res), json_decode(wp_remote_retrieve_body($res), true));
+}
+
+/* ------------------------------------------------------------------
+ * 1. Referral link capture: ?lku=CODE → first-party cookie "CODE|timestamp"
+ * ------------------------------------------------------------------ */
 add_action('init', static function () {
     if (empty($_GET['lku'])) {
         return;
     }
-    $code = preg_replace('/[^A-Za-z0-9_-]/', '', (string) wp_unslash($_GET['lku']));
-    if ($code === '' || strlen($code) > 64) {
+    $code = preg_replace('/[^A-Za-z0-9]/', '', (string) wp_unslash($_GET['lku']));
+    if (strlen($code) < 4 || strlen($code) > 16) {
         return;
     }
-    setcookie(LINKUP_COOKIE, $code . '|' . time(), [
+    $value = $code . '|' . time();
+    setcookie(LINKUP_COOKIE, $value, array(
         'expires'  => time() + LINKUP_COOKIE_DAYS * DAY_IN_SECONDS,
         'path'     => '/',
         'secure'   => is_ssl(),
         'httponly' => true,
         'samesite' => 'Lax',
-    ]);
+    ));
+    $_COOKIE[LINKUP_COOKIE] = $value;
 });
 
-/* Persist the referral on the order itself (HPOS-safe meta API). */
 add_action('woocommerce_checkout_order_created', static function ($order) {
     if (!empty($_COOKIE[LINKUP_COOKIE])) {
         $raw = sanitize_text_field(wp_unslash($_COOKIE[LINKUP_COOKIE]));
-        $order->update_meta_data('_linkup_ref', $raw);
-        $order->save();
+        if (preg_match('/^[A-Za-z0-9]{4,16}\|[0-9]{9,11}$/', $raw)) {
+            $order->update_meta_data('_linkup_ref', $raw);
+            $order->save();
+        }
     }
 });
 
-/* ---- Order events → LINKUP (async via Action Scheduler; retried) ---- */
-function linkup_queue_order_event(int $order_id, string $type, array $extra = []): void {
-    if (!function_exists('as_enqueue_async_action')) {
-        return;
-    }
-    as_enqueue_async_action('linkup_send_order_event', [[
-        'order_id' => $order_id,
-        'type'     => $type,
-        'event_id' => wp_generate_uuid4(),
-        'at'       => time(),
-        'extra'    => $extra,
-    ]], 'linkup');
+/* ------------------------------------------------------------------
+ * 2. Order events — deterministic event ids (order + modification time),
+ *    queued in Action Scheduler, retried with backoff.
+ * ------------------------------------------------------------------ */
+function linkup_to_minor($v) {
+    return (int) round(((float) $v) * 100);
 }
 
-add_action('woocommerce_new_order', static fn ($id) => linkup_queue_order_event((int) $id, 'order.upserted'));
-add_action('woocommerce_order_status_changed', static fn ($id) => linkup_queue_order_event((int) $id, 'order.upserted'));
-add_action('woocommerce_order_refunded', static fn ($id, $refund_id) => linkup_queue_order_event((int) $id, 'order.refunded', ['refund_id' => (int) $refund_id]), 10, 2);
+function linkup_order_payload($order) {
+    $refunds = array();
+    foreach ($order->get_refunds() as $refund) {
+        $refunds[] = array('id' => (string) $refund->get_id(), 'amount' => linkup_to_minor($refund->get_amount()));
+    }
+    $modified = $order->get_date_modified() ? $order->get_date_modified()->getTimestamp() : time();
+    $email = strtolower(trim((string) $order->get_billing_email()));
+    return array(
+        'event_id'    => 'o' . $order->get_id() . '-m' . $modified . '-r' . count($refunds) . '-' . $order->get_status(),
+        'type'        => 'order.upserted',
+        'occurred_at' => gmdate('c', $modified),
+        'order'       => array(
+            'id'           => (string) $order->get_id(),
+            'status'       => $order->get_status(),
+            'currency'     => strtoupper($order->get_currency()),
+            'total'        => linkup_to_minor($order->get_total()),
+            'tax'          => linkup_to_minor($order->get_cart_tax()),
+            'shipping'     => linkup_to_minor($order->get_shipping_total()),
+            'shipping_tax' => linkup_to_minor($order->get_shipping_tax()),
+            'coupons'      => array_values($order->get_coupon_codes()),
+            'ref'          => (string) $order->get_meta('_linkup_ref'),
+            'email_hash'   => $email !== '' ? hash('sha256', $email) : '',
+            'created_at'   => $order->get_date_created() ? $order->get_date_created()->format('c') : gmdate('c'),
+            'refunds'      => $refunds,
+        ),
+    );
+}
 
-add_action('linkup_send_order_event', static function (array $job) {
-    $s = linkup_settings();
-    if (empty($s['endpoint']) || empty($s['secret']) || empty($s['connection_id'])) {
+function linkup_queue_order($order_id) {
+    if (!linkup_credentials() || !function_exists('as_enqueue_async_action')) {
         return;
     }
-    $order = wc_get_order($job['order_id']);
+    $order = wc_get_order($order_id);
+    if (!$order || $order->get_type() !== 'shop_order') {
+        return;
+    }
+    as_enqueue_async_action('linkup_send_order', array((int) $order_id, 0), 'linkup');
+}
+
+add_action('woocommerce_new_order', 'linkup_queue_order');
+add_action('woocommerce_order_status_changed', 'linkup_queue_order');
+add_action('woocommerce_order_refunded', 'linkup_queue_order');
+
+add_action('linkup_send_order', static function ($order_id, $attempt = 0) {
+    $order = wc_get_order($order_id);
     if (!$order) {
         return;
     }
-    $to_minor = static fn ($v) => (int) round(((float) $v) * 100);
-    $payload = [
-        'event_id'    => $job['event_id'],
-        'type'        => $job['type'],
-        'occurred_at' => gmdate('c', (int) $job['at']),
-        'order'       => [
-            'id'            => (string) $order->get_id(),
-            'status'        => $order->get_status(),
-            'currency'      => $order->get_currency(),
-            'total'         => $to_minor($order->get_total()),
-            'tax'           => $to_minor($order->get_cart_tax()),
-            'shipping'      => $to_minor($order->get_shipping_total()),
-            'shipping_tax'  => $to_minor($order->get_shipping_tax()),
-            'coupons'       => array_values($order->get_coupon_codes()),
-            'ref'           => (string) $order->get_meta('_linkup_ref'),
-            'email_hash'    => hash('sha256', strtolower(trim((string) $order->get_billing_email()))),
-            'created_at'    => $order->get_date_created() ? $order->get_date_created()->format('c') : null,
-        ],
-        'extra'       => $job['extra'],
-    ];
-    if ($job['type'] === 'order.refunded' && !empty($job['extra']['refund_id'])) {
-        $refund = wc_get_order($job['extra']['refund_id']);
-        if ($refund) {
-            $payload['refund'] = ['id' => (string) $refund->get_id(), 'amount' => $to_minor($refund->get_amount())];
-        }
+    list($code) = linkup_post(array('action' => 'event', 'event' => linkup_order_payload($order)));
+    if ($code >= 200 && $code < 300) {
+        return;
     }
-    $body = wp_json_encode($payload);
-    $ts = time();
-    $res = wp_remote_post($s['endpoint'], [
-        'timeout' => 10,
-        'headers' => [
-            'Content-Type'          => 'application/json',
-            'X-Linkup-Connection'   => $s['connection_id'],
-            'X-Linkup-Timestamp'    => (string) $ts,
-            'X-Linkup-Signature'    => linkup_sign($body, $ts, $s['secret']),
-        ],
-        'body'    => $body,
-    ]);
-    $code = is_wp_error($res) ? 0 : (int) wp_remote_retrieve_response_code($res);
-    if ($code < 200 || $code >= 300) {
-        // Throwing makes Action Scheduler mark it failed; LINKUP's hourly reconciliation covers gaps.
-        throw new \RuntimeException('LINKUP delivery failed: HTTP ' . $code);
+    if ($code === 422 || $code === 401) {
+        return; // permanent: invalid data or wrong key; hourly reconciliation will retry with fresh data
+    }
+    if ($attempt < 5 && function_exists('as_schedule_single_action')) {
+        as_schedule_single_action(time() + (60 * pow(2, $attempt)), 'linkup_send_order', array((int) $order_id, $attempt + 1), 'linkup');
+    }
+}, 10, 2);
+
+/* ------------------------------------------------------------------
+ * 3. Sync every 15 minutes: heartbeat, partner coupons, reconciliation of
+ *    orders modified since the last sync (covers lost events).
+ * ------------------------------------------------------------------ */
+add_action('init', static function () {
+    if (linkup_credentials() && function_exists('as_has_scheduled_action') && !as_has_scheduled_action('linkup_sync')) {
+        as_schedule_recurring_action(time() + 60, 15 * MINUTE_IN_SECONDS, 'linkup_sync', array(), 'linkup');
     }
 });
 
-/* Phase 1 adds: connect flow (one-time code), signed REST endpoints for coupon create/disable,
-   heartbeat, reconciliation listing, admin settings page, and safe disconnect. */
+function linkup_sync() {
+    list($code, $res) = linkup_post(array('action' => 'sync', 'plugin_version' => LINKUP_VERSION));
+    if ($code !== 200 || empty($res['ok'])) {
+        update_option(LINKUP_OPT_LAST, array('ok' => false, 'code' => $code, 'at' => time()), false);
+        return false;
+    }
+    $created = 0;
+    foreach ((array) $res['result']['coupons'] as $c) {
+        $created += linkup_apply_coupon((string) $c['code'], (int) $c['discount_pct'], !empty($c['active'])) ? 1 : 0;
+    }
+    // Reconciliation: resend recently modified orders (deterministic ids → server de-duplicates).
+    $last = get_option(LINKUP_OPT_LAST, array());
+    $since = !empty($last['ok']) ? (int) $last['at'] - 300 : time() - 2 * DAY_IN_SECONDS;
+    $orders = wc_get_orders(array('type' => 'shop_order', 'date_modified' => '>' . $since, 'limit' => 200, 'return' => 'ids'));
+    foreach ($orders as $id) {
+        linkup_queue_order($id);
+    }
+    update_option(LINKUP_OPT_LAST, array('ok' => true, 'code' => 200, 'at' => time(), 'coupons' => count((array) $res['result']['coupons'])), false);
+    return true;
+}
+add_action('linkup_sync', 'linkup_sync');
+
+/** Create or update a LINKUP-managed coupon. Never touches coupons the store created itself. */
+function linkup_apply_coupon($code, $pct, $active) {
+    if (!preg_match('/^[A-Z0-9]{4,16}$/', $code)) {
+        return false;
+    }
+    $id = wc_get_coupon_id_by_code($code);
+    $coupon = new WC_Coupon($id ? $id : 0);
+    if ($id && $coupon->get_meta('_linkup_managed') !== '1') {
+        return false;
+    }
+    $changed = !$id;
+    if (!$id) {
+        $coupon->set_code($code);
+        $coupon->set_discount_type('percent');
+        $coupon->set_description('LINKUP partner coupon');
+        $coupon->update_meta_data('_linkup_managed', '1');
+    }
+    if ((int) $coupon->get_amount() !== $pct) {
+        $coupon->set_amount($pct);
+        $changed = true;
+    }
+    $want = $active ? 'publish' : 'draft';
+    if ($coupon->get_status() !== $want) {
+        $coupon->set_status($want);
+        $changed = true;
+    }
+    if ($changed) {
+        $coupon->save();
+    }
+    return !$id;
+}
+
+/* ------------------------------------------------------------------
+ * 4. Settings page: one field (connection key) + "sync now".
+ * ------------------------------------------------------------------ */
+add_action('admin_menu', static function () {
+    add_submenu_page('woocommerce', 'LINKUP', 'LINKUP', 'manage_woocommerce', 'linkup', 'linkup_settings_page');
+});
+
+function linkup_settings_page() {
+    if (!current_user_can('manage_woocommerce')) {
+        return;
+    }
+    $notice = '';
+    if (isset($_POST['linkup_nonce']) && wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['linkup_nonce'])), 'linkup_save')) {
+        $key = isset($_POST['linkup_key']) ? trim(sanitize_text_field(wp_unslash($_POST['linkup_key']))) : '';
+        if (isset($_POST['linkup_disconnect'])) {
+            delete_option(LINKUP_OPT_KEY);
+            delete_option(LINKUP_OPT_LAST);
+            if (function_exists('as_unschedule_all_actions')) {
+                as_unschedule_all_actions('linkup_sync');
+            }
+            $notice = 'החיבור נותק. הקופונים הקיימים וההיסטוריה ב-LINKUP נשמרו.';
+        } elseif ($key !== '') {
+            if (preg_match('/^lk_[0-9a-f]{32}_[0-9a-f]{64}$/', $key)) {
+                update_option(LINKUP_OPT_KEY, $key, false);
+                $notice = linkup_sync() ? 'מחובר! החנות מסונכרנת עם LINKUP.' : 'המפתח נשמר, אבל החיבור נכשל. ודאו שהעתקתם את המפתח המלא.';
+            } else {
+                $notice = 'מפתח לא תקין. העתיקו אותו שוב מ-LINKUP.';
+            }
+        }
+        if (isset($_POST['linkup_sync_now']) && $key === '') {
+            $notice = linkup_sync() ? 'סונכרן בהצלחה.' : 'הסנכרון נכשל.';
+        }
+    }
+    $connected = (bool) linkup_credentials();
+    $last = get_option(LINKUP_OPT_LAST, array());
+    ?>
+    <div class="wrap" dir="rtl" style="max-width:640px">
+        <h1>LINKUP</h1>
+        <?php if ($notice) : ?><div class="notice notice-info"><p><?php echo esc_html($notice); ?></p></div><?php endif; ?>
+        <p>מצב: <strong><?php echo $connected ? (!empty($last['ok']) ? 'מחובר ✓' : 'מפתח שמור — ממתין לסנכרון') : 'לא מחובר'; ?></strong>
+        <?php if (!empty($last['at'])) : ?> · סנכרון אחרון: <?php echo esc_html(wp_date('d/m/Y H:i', (int) $last['at'])); ?><?php endif; ?></p>
+        <form method="post">
+            <?php wp_nonce_field('linkup_save', 'linkup_nonce'); ?>
+            <p><label for="linkup_key"><strong>מפתח חיבור</strong> (מעתיקים מ-LINKUP)</label></p>
+            <p><input type="password" id="linkup_key" name="linkup_key" class="large-text" autocomplete="off"
+                      placeholder="<?php echo $connected ? '•••••• (שמור). להחלפה — הדביקו מפתח חדש' : 'lk_...'; ?>"></p>
+            <p><button class="button button-primary">שמירה וחיבור</button>
+            <?php if ($connected) : ?> <button class="button" name="linkup_sync_now" value="1">סנכרון עכשיו</button>
+            <button class="button-link-delete" name="linkup_disconnect" value="1" onclick="return confirm('לנתק את החנות מ-LINKUP?')">ניתוק</button><?php endif; ?></p>
+        </form>
+    </div>
+    <?php
+}
+
+register_deactivation_hook(__FILE__, static function () {
+    if (function_exists('as_unschedule_all_actions')) {
+        as_unschedule_all_actions('linkup_sync');
+    }
+});

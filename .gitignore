@@ -6,3 +6,6 @@ node_modules/
 *.log
 drizzle/meta/
 coverage/
+apps/web/public/downloads/
+*.tsbuildinfo
+next-env.d.ts

@@ -17,18 +17,28 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.1"
       - run: npm ci
       - run: npm run typecheck
+      # DB tests run the real supabase/migrations in an in-memory Postgres (PGlite); PHP is used for signature compatibility.
       - run: npm test
-      - run: npm audit --audit-level=high
+      - run: npm audit --audit-level=high --omit=dev
       - run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci
 
   plugin:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php: ["7.4", "8.3"]
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.1"
+          php-version: ${{ matrix.php }}
       - name: PHP syntax check
         run: find plugins -name "*.php" -print0 | xargs -0 -n1 php -l

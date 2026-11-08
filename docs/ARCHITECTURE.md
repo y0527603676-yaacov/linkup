@@ -4,13 +4,15 @@
 | # | החלטה | למה (פשטות / ויראליות / הכנסה) |
 |---|---|---|
 | 1 | **Modular monolith** אחד ב-Next.js (App Router) + TypeScript strict | צוות קטן, פריסה אחת, מהיר לשוק |
-| 2 | **PostgreSQL** + **Drizzle ORM** | אילוצים חזקים לכסף; טיפוסים מקצה לקצה |
+| 2 | **Supabase (PostgreSQL)**, פרויקט `linkup` נפרד. כל הלוגיקה הכספית בפונקציות SQL אטומיות (`supabase/migrations`) | טרנזקציה אחת לכל אירוע; אילוצים חזקים; מקור אמת יחיד |
 | 3 | **כסף כמספר שלם ביחידות קטנות** (אגורות/סנטים) + קוד מטבע | אין שגיאות עיגול |
 | 4 | **Ledger append-only** לעמלות | ביקורת מלאה, תיקון = רשומה נגדית |
 | 5 | **תיבת דואר נכנס לאירועים** (`order_events` עם מפתח ייחודי) | Idempotency, אירועים כפולים/לא בסדר |
 | 6 | **תוסף WordPress ב-PHP** שדוחף אירועים חתומים (HMAC-SHA256) + משיכת התאמה תקופתית | Webhook לא מובטח → reconciliation |
-| 7 | **Jobs ברקע**: טבלת jobs ב-Postgres (pg-boss) | בלי Redis/תשתית נוספת בהתחלה |
-| 8 | **אימות**: Magic link במייל + OTP ב-SMS (שלב 1: מייל בלבד) | פחות שדות, אין סיסמה, מהיר לנייד |
+| 7 | **Jobs ברקע**: pg_cron ב-Supabase (אישור עמלות לילי) + Action Scheduler בתוסף | בלי תשתית נוספת |
+| 8 | **אימות**: Supabase Auth — קישור או קוד במייל, בלי סיסמה | פחות שדות, מהיר לנייד |
+| 11 | **הרשאות**: ללקוח רק SELECT דרך RLS; כל כתיבה דרך פונקציות SECURITY DEFINER שבודקות חברות בארגון. האתר לא מחזיק מפתח שירות | בידוד דיירים נאכף במסד עצמו |
+| 12 | **קליטת WooCommerce**: Edge Function `woo` (חתימת HMAC לכל חנות) → `ingest_order_event` | הסוד לא יוצא מהשרת |
 | 9 | **Adapter לפלטפורמות מסחר** (`CommercePlatform` interface) | Shopify בעתיד בלי לשנות את הדומיין |
 | 10 | **i18n מהיום הראשון** (he ברירת מחדל, RTL; en מוכן) | ריבוי שפות בלי שכתוב |
 
@@ -41,13 +43,12 @@ linkup/
 - **Billing** קורא מה-ledger → מחשב עמלת פלטפורמה וחשבונית.
 - **Growth** מנהל הזמנות ומקור הפניה; לא נוגע בכסף, רק מתייג `referral_id`.
 
-## זרימת אירוע הזמנה
+## זרימת אירוע הזמנה (מיושם)
 ```
-WooCommerce hook → תוסף חותם HMAC → POST /api/webhooks/woocommerce
- → אימות חתימה + timestamp (≤5 דק') → INSERT order_events (ON CONFLICT DO NOTHING)
- → 200 מיד → job: עיבוד לפי סדר כרונולוגי לכל הזמנה
- → attribution → ledger entries
-Cron כל שעה: משיכת הזמנות שעודכנו מ-WooCommerce REST → השוואה → אירועים חסרים.
+WooCommerce hook → Action Scheduler → תוסף חותם HMAC → Edge Function `woo`
+ → אימות חתימה + timestamp (≤5 דק') → ingest_order_event (טרנזקציה אחת):
+   inbox ייחודי → upsert הזמנה (אירוע ישן לא דורס חדש) → החזרים → ייחוס → יישור ledger למצב היעד
+תוסף כל 15 דק': heartbeat + סנכרון קופונים + שליחה חוזרת של הזמנות שעודכנו (מזהי אירוע דטרמיניסטיים).
 ```
 
 ## סביבות
