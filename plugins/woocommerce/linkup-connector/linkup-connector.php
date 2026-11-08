@@ -2,7 +2,7 @@
 /**
  * Plugin Name: LINKUP Connector
  * Description: מחבר את חנות ה-WooCommerce ל-LINKUP — קופונים לשותפים, מעקב הפניות ודיווח מכירות מאובטח.
- * Version: 0.2.0
+ * Version: 0.2.1
  * Requires at least: 6.4
  * Requires PHP: 7.4
  * WC requires at least: 8.0
@@ -11,7 +11,7 @@
 
 defined('ABSPATH') || exit;
 
-define('LINKUP_VERSION', '0.2.0');
+define('LINKUP_VERSION', '0.2.1');
 define('LINKUP_ENDPOINT', 'https://ycuvcpslvkgndytubycn.supabase.co/functions/v1/woo');
 define('LINKUP_OPT_KEY', 'linkup_connection_key');
 define('LINKUP_OPT_LAST', 'linkup_last_sync');
@@ -131,36 +131,57 @@ function linkup_order_payload($order) {
     );
 }
 
+/* Orders changed during this request are sent directly at the end of the request
+   (no dependency on background cron). Action Scheduler is used only to retry failures. */
+$GLOBALS['linkup_pending_orders'] = array();
+
 function linkup_queue_order($order_id) {
-    if (!linkup_credentials() || !function_exists('as_enqueue_async_action')) {
+    if (!linkup_credentials()) {
         return;
     }
-    $order = wc_get_order($order_id);
-    if (!$order || $order->get_type() !== 'shop_order') {
-        return;
-    }
-    as_enqueue_async_action('linkup_send_order', array((int) $order_id, 0), 'linkup');
+    $GLOBALS['linkup_pending_orders'][(int) $order_id] = true;
 }
 
 add_action('woocommerce_new_order', 'linkup_queue_order');
+add_action('woocommerce_update_order', 'linkup_queue_order');
 add_action('woocommerce_order_status_changed', 'linkup_queue_order');
 add_action('woocommerce_order_refunded', 'linkup_queue_order');
 
-add_action('linkup_send_order', static function ($order_id, $attempt = 0) {
-    $order = wc_get_order($order_id);
-    if (!$order) {
+add_action('shutdown', static function () {
+    if (empty($GLOBALS['linkup_pending_orders'])) {
         return;
+    }
+    $ids = array_keys($GLOBALS['linkup_pending_orders']);
+    $GLOBALS['linkup_pending_orders'] = array();
+    if (function_exists('fastcgi_finish_request')) {
+        fastcgi_finish_request(); // let the browser continue while we report to LINKUP
+    }
+    foreach (array_slice($ids, 0, 20) as $id) {
+        linkup_send_order_now($id, 0);
+    }
+});
+
+/** Send one order to LINKUP now. Returns true on success. Schedules a retry on temporary failure. */
+function linkup_send_order_now($order_id, $attempt = 0) {
+    $order = wc_get_order($order_id);
+    if (!$order || $order->get_type() !== 'shop_order') {
+        return false;
     }
     list($code) = linkup_post(array('action' => 'event', 'event' => linkup_order_payload($order)));
     if ($code >= 200 && $code < 300) {
-        return;
+        return true;
     }
     if ($code === 422 || $code === 401) {
-        return; // permanent: invalid data or wrong key; hourly reconciliation will retry with fresh data
+        return false; // permanent: invalid data or wrong key
     }
     if ($attempt < 5 && function_exists('as_schedule_single_action')) {
         as_schedule_single_action(time() + (60 * pow(2, $attempt)), 'linkup_send_order', array((int) $order_id, $attempt + 1), 'linkup');
     }
+    return false;
+}
+
+add_action('linkup_send_order', static function ($order_id, $attempt = 0) {
+    linkup_send_order_now($order_id, $attempt);
 }, 10, 2);
 
 /* ------------------------------------------------------------------
@@ -186,9 +207,9 @@ function linkup_sync() {
     // Reconciliation: resend recently modified orders (deterministic ids → server de-duplicates).
     $last = get_option(LINKUP_OPT_LAST, array());
     $since = !empty($last['ok']) ? (int) $last['at'] - 300 : time() - 2 * DAY_IN_SECONDS;
-    $orders = wc_get_orders(array('type' => 'shop_order', 'date_modified' => '>' . $since, 'limit' => 200, 'return' => 'ids'));
+    $orders = wc_get_orders(array('type' => 'shop_order', 'date_modified' => '>' . $since, 'limit' => 50, 'return' => 'ids'));
     foreach ($orders as $id) {
-        linkup_queue_order($id);
+        linkup_send_order_now($id, 0); // deterministic event ids → server ignores duplicates
     }
     update_option(LINKUP_OPT_LAST, array('ok' => true, 'code' => 200, 'at' => time(), 'coupons' => count((array) $res['result']['coupons'])), false);
     return true;
