@@ -1,12 +1,10 @@
 import "server-only";
 import { createServerClient } from "@supabase/ssr";
 import { cookies, headers } from "next/headers";
+import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from "./env";
 
 export function supabaseEnv() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-  if (!url || !key) throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY");
-  return { url, key };
+  return { url: SUPABASE_URL, key: SUPABASE_PUBLISHABLE_KEY };
 }
 
 /** Server client acting as the signed-in user (or anon). Never uses a service key. */
