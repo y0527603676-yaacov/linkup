@@ -145,7 +145,7 @@ input[type="range"] { padding: 0; border: 0; min-height: 32px; accent-color: var
 .site-nav .hide-sm { display: inline; }
 @media (max-width: 640px) { .site-nav .hide-sm { display: none; } .site-nav { gap: 12px; } }
 .container { max-width: 1120px; margin: 0 auto; padding: 0 16px; }
-.hero { padding: 56px 0 40px; }
+.hero { padding-block: 56px 40px; }
 .hero h1 { font-size: clamp(2rem, 6.4vw, 3.6rem); max-width: 18ch; margin: 12px 0 16px; letter-spacing: -.025em; }
 .hero .lead { max-width: 56ch; font-size: clamp(1.05rem, 2.4vw, 1.25rem); }
 .hero .actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 24px; }
@@ -193,7 +193,7 @@ input[type="range"] { padding: 0; border: 0; min-height: 32px; accent-color: var
 .opp .thumbs img, .opp .thumbs span { aspect-ratio: 1; object-fit: cover; width: 100%; background: var(--surface-2); }
 .site-footer { border-top: 1px solid var(--line); padding: 28px 0 40px; color: var(--muted); font-size: .9rem; }
 .site-footer .row a { color: var(--muted); }
-.final { text-align: center; padding: 64px 0; }
+.final { text-align: center; padding-block: 64px; }
 .final h2 { font-size: clamp(1.5rem, 4vw, 2.3rem); max-width: 22ch; margin: 0 auto 20px; }
 
 /* ---------- App shell ---------- */

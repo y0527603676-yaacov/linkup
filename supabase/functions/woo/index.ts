@@ -1,5 +1,6 @@
 // LINKUP ← WooCommerce plugin endpoint.
-// Auth: per-store HMAC signature (no JWT). Body: {"action":"sync"} | {"action":"event","event":{...}}
+// Auth: per-store HMAC signature (no JWT).
+// Body: {"action":"sync"} | {"action":"event","event":{...}} | {"action":"products","products":[...],"full_started_at"?}
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { normalizeConnectionId, verifySignature } from "./hmac.ts";
 
@@ -31,7 +32,7 @@ Deno.serve(async (req) => {
     return json({ error: "unauthorized" }, 401);
   }
 
-  let body: { action?: string; event?: unknown; plugin_version?: string };
+  let body: { action?: string; event?: unknown; plugin_version?: string; products?: unknown; full_started_at?: string };
   try {
     body = JSON.parse(raw);
   } catch {
@@ -42,6 +43,12 @@ Deno.serve(async (req) => {
     ? supabase.rpc("plugin_sync", { p_connection: connectionId, p_plugin_version: String(body.plugin_version ?? "") })
     : body.action === "event"
     ? supabase.rpc("ingest_order_event", { p_connection: connectionId, p_event: body.event })
+    : body.action === "products"
+    ? supabase.rpc("plugin_sync_products", {
+        p_connection: connectionId,
+        p_products: Array.isArray(body.products) ? body.products : [],
+        p_full_started_at: typeof body.full_started_at === "string" ? body.full_started_at : null,
+      })
     : null;
   if (!call) return json({ error: "unknown_action" }, 400);
 

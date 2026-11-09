@@ -2,7 +2,7 @@
 /**
  * Plugin Name: LINKUP Connector
  * Description: מחבר את חנות ה-WooCommerce ל-LINKUP — קופונים לשותפים, מעקב הפניות ודיווח מכירות מאובטח.
- * Version: 0.2.1
+ * Version: 0.3.0
  * Requires at least: 6.4
  * Requires PHP: 7.4
  * WC requires at least: 8.0
@@ -11,7 +11,7 @@
 
 defined('ABSPATH') || exit;
 
-define('LINKUP_VERSION', '0.2.1');
+define('LINKUP_VERSION', '0.3.0');
 define('LINKUP_ENDPOINT', 'https://ycuvcpslvkgndytubycn.supabase.co/functions/v1/woo');
 define('LINKUP_OPT_KEY', 'linkup_connection_key');
 define('LINKUP_OPT_LAST', 'linkup_last_sync');
@@ -211,10 +211,118 @@ function linkup_sync() {
     foreach ($orders as $id) {
         linkup_send_order_now($id, 0); // deterministic event ids → server ignores duplicates
     }
+    linkup_products_full_pass_step();
     update_option(LINKUP_OPT_LAST, array('ok' => true, 'code' => 200, 'at' => time(), 'coupons' => count((array) $res['result']['coupons'])), false);
     return true;
 }
 add_action('linkup_sync', 'linkup_sync');
+
+/* ------------------------------------------------------------------
+ * 3b. Products & stock (catalogue for creators). Read-only towards the store:
+ *     LINKUP never changes products. Changed products are sent at the end of the
+ *     request; a full pass (100 per sync) runs every 6 hours to catch everything else.
+ * ------------------------------------------------------------------ */
+function linkup_product_payload($product) {
+    if (!$product || $product->get_type() === 'variation') {
+        return null;
+    }
+    $image = '';
+    $img_id = $product->get_image_id();
+    if ($img_id) {
+        $image = (string) wp_get_attachment_image_url($img_id, 'large');
+        $image = set_url_scheme($image, 'https');
+    }
+    $cats = array();
+    foreach ((array) wc_get_product_terms($product->get_id(), 'product_cat', array('fields' => 'names')) as $n) {
+        $cats[] = (string) $n;
+    }
+    $price = $product->get_price();
+    return array(
+        'id'        => (string) $product->get_id(),
+        'name'      => wp_strip_all_tags($product->get_name()),
+        'url'       => (string) get_permalink($product->get_id()),
+        'image'     => $image,
+        'price'     => $price === '' ? null : linkup_to_minor($price),
+        'currency'  => get_woocommerce_currency(),
+        'in_stock'  => $product->is_in_stock(),
+        'stock_qty' => $product->managing_stock() ? (int) $product->get_stock_quantity() : null,
+        'categories'=> array_slice($cats, 0, 10),
+        'status'    => $product->get_status() === 'publish' && $product->get_catalog_visibility() !== 'hidden' ? 'publish' : 'hidden',
+    );
+}
+
+function linkup_send_products(array $ids, $full_started_at = null) {
+    $items = array();
+    foreach (array_unique(array_map('intval', $ids)) as $id) {
+        $p = linkup_product_payload(wc_get_product($id));
+        if ($p) {
+            $items[] = $p;
+        }
+    }
+    if (!$items && !$full_started_at) {
+        return true;
+    }
+    $payload = array('action' => 'products', 'products' => $items);
+    if ($full_started_at) {
+        $payload['full_started_at'] = gmdate('c', (int) $full_started_at - 600); // tolerate clock skew
+    }
+    list($code) = linkup_post($payload);
+    return $code === 200;
+}
+
+$GLOBALS['linkup_product_queue'] = array();
+function linkup_queue_product($id) {
+    $product = wc_get_product($id);
+    if ($product && $product->get_type() === 'variation') {
+        $id = $product->get_parent_id();
+    }
+    if ($id) {
+        $GLOBALS['linkup_product_queue'][(int) $id] = true;
+    }
+}
+add_action('woocommerce_update_product', 'linkup_queue_product');
+add_action('woocommerce_new_product', 'linkup_queue_product');
+add_action('woocommerce_product_set_stock', static function ($product) { linkup_queue_product($product->get_id()); });
+add_action('woocommerce_variation_set_stock', static function ($product) { linkup_queue_product($product->get_id()); });
+add_action('woocommerce_product_set_stock_status', 'linkup_queue_product');
+add_action('trashed_post', static function ($post_id) {
+    if (get_post_type($post_id) === 'product') {
+        linkup_queue_product($post_id);
+    }
+});
+add_action('shutdown', static function () {
+    $ids = array_keys($GLOBALS['linkup_product_queue']);
+    if ($ids && linkup_credentials()) {
+        foreach (array_chunk($ids, 50) as $chunk) {
+            linkup_send_products($chunk);
+        }
+    }
+}, 20);
+
+/** One page of the periodic full pass. State: started_at, page. */
+function linkup_products_full_pass_step() {
+    $state = get_option('linkup_products_pass', array());
+    $now = time();
+    if (empty($state['started_at'])) {
+        $last_done = isset($state['done_at']) ? (int) $state['done_at'] : 0;
+        if ($now - $last_done < 6 * HOUR_IN_SECONDS) {
+            return;
+        }
+        $state = array('started_at' => $now, 'page' => 1);
+    }
+    $ids = wc_get_products(array('status' => array('publish', 'private', 'draft'), 'type' => array('simple', 'variable', 'grouped', 'external'),
+                                 'limit' => 100, 'page' => (int) $state['page'], 'return' => 'ids', 'orderby' => 'ID', 'order' => 'ASC'));
+    $last = count($ids) < 100;
+    if (!linkup_send_products($ids, $last ? $state['started_at'] : null)) {
+        return; // retry the same page next sync
+    }
+    if ($last) {
+        update_option('linkup_products_pass', array('done_at' => $now), false);
+    } else {
+        $state['page'] = (int) $state['page'] + 1;
+        update_option('linkup_products_pass', $state, false);
+    }
+}
 
 /** Create or update a LINKUP-managed coupon. Never touches coupons the store created itself. */
 function linkup_apply_coupon($code, $pct, $active) {
