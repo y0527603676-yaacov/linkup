@@ -245,3 +245,28 @@ describe("viral loop: creator invites a new store", () => {
     await db.exec(`update app_settings set value='50' where key='max_proposals_per_day'`);
   });
 });
+
+describe("implied VAT (prices include VAT, store reports tax = 0)", () => {
+  it("ILS order without tax lines: base = (total − shipping) / 1.18", async () => {
+    await ingest(event("3001", { coupons: [code], tax: 0, shipping: 3_000, shipping_tax: 0 }));
+    // (50000 − 3000) / 1.18 = 39830.5 → 39831; creator 10% → 3983
+    const r = await db.one<{ base: string }>({ role: "owner" }, `select base_minor::text base from orders where external_order_id='3001'`);
+    expect(Number(r.base)).toBe(39831);
+  });
+
+  it("VAT-exempt store override (0) keeps the full amount; foreign currency is not reduced", async () => {
+    await db.exec(`update organizations set implied_vat_bps = 0 where id = '${storeOrg}'`);
+    await ingest(event("3002", { coupons: [code], tax: 0, shipping: 0, shipping_tax: 0, total: 40_000 }));
+    await db.exec(`update organizations set implied_vat_bps = null where id = '${storeOrg}'`);
+    await ingest(event("3003", { coupons: [code], tax: 0, shipping: 0, shipping_tax: 0, total: 40_000, currency: "USD" }));
+    const rows = await db.as<{ id: string; base: string }>({ role: "owner" },
+      `select external_order_id id, base_minor::text base from orders where external_order_id in ('3002','3003') order by 1`);
+    expect(rows.map((r) => Number(r.base))).toEqual([40_000, 40_000]);
+  });
+
+  it("explicit tax lines still take precedence", async () => {
+    await ingest(event("3004", { coupons: [code] })); // tax 7169 given
+    const r = await db.one<{ base: string }>({ role: "owner" }, `select base_minor::text base from orders where external_order_id='3004'`);
+    expect(Number(r.base)).toBe(39_831);
+  });
+});
