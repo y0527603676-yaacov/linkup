@@ -36,6 +36,9 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
   const next = nextFor(status, t, q);
   const sales = (d.recent_sales ?? []) as Sale[];
   const cur = d.currency ?? "ILS";
+  // Never show a row of zeros: stats appear once there is real money to show.
+  const hasMoney = [d.month_sales_minor, d.approved_commissions_minor, d.pending_commissions_minor, d.month_platform_fee_minor,
+    d.month_earnings_minor, d.pending_minor, d.approved_minor].some((v) => Number(v ?? 0) !== 0);
 
   return (
     <AppShell ctx={ctx} active="home" path="/app">
@@ -43,7 +46,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
       {sp.accepted && <Alert kind="ok" text={t.dash.accepted} />}
       {next && <NextAction eyebrow={t.next.title} title={next.t} text={next.d} cta={next.cta} href={next.href} />}
 
-      {status.sales > 0 && (org.type === "store" || status.is_admin) && (
+      {status.sales > 0 && (org.type === "store" || status.is_admin) && hasMoney && (
         <section className="section stats">
           {org.type === "store" ? (
             <>
