@@ -39,7 +39,7 @@ export default async function Home() {
         <div className="container split">
           <div>
             <h2>{h.trustTitle}</h2>
-            <p className="sub">{t.slogan}.</p>
+            <p className="sub">{t.brand}.</p>
             <ul className="ticks">{h.trust.map((x) => <li key={x}>{x}</li>)}</ul>
           </div>
           <div className="fp">

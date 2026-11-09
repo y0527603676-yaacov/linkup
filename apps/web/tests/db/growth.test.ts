@@ -467,3 +467,27 @@ describe("review hardening", () => {
     expect(after).toEqual(before);
   });
 });
+
+describe("referral code enumeration protection", () => {
+  it("anonymous visitors cannot resolve codes", async () => {
+    await expect(rpc(anon, "referrer_name", { p_code: code.refR })).rejects.toThrow(/permission denied/);
+  });
+  it("a signed-in user can resolve a real code, but systematic guessing is blocked after 5 unknown codes per hour", async () => {
+    const g: Who = { role: "authenticated", userId: await createUser(db, "guesser@x.com") };
+    expect(await rpc(g, "referrer_name", { p_code: code.refR })).toBe("Ref Creator");
+    for (let i = 0; i < 5; i++) expect(await rpc(g, "referrer_name", { p_code: `AAAAAAAA0${i}` })).toBeNull();
+    await expect(rpc(g, "referrer_name", { p_code: "AAAAAAAA09" })).rejects.toThrow(/rate_limited/);
+    await expect(rpc(g, "referrer_name", { p_code: code.refR })).rejects.toThrow(/rate_limited/);
+  });
+  it("sign-up never fails because of the limit — it just proceeds without a referral", async () => {
+    const g: Who = { role: "authenticated", userId: await createUser(db, "guesser2@x.com") };
+    for (let i = 0; i < 5; i++) await rpc(g, "referrer_name", { p_code: `BBBBBBBB0${i}` });
+    const o = await rpc(g, "create_organization", { p_type: "creator", p_name: "Still Works", p_ref_code: code.refR });
+    expect(o).toBeTruthy();
+    expect(await q(`select 1 from referrals where referred_org_id = $1`, [o])).toHaveLength(0);
+  });
+  it("referral codes are long random values (10 characters)", async () => {
+    const r = await q<{ c: string }>(`select referral_code as c from organizations where id = $1`, [org.A]);
+    expect(r[0]!.c).toMatch(/^[0-9A-F]{10}$/);
+  });
+});

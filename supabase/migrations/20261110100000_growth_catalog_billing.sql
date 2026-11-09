@@ -102,8 +102,12 @@ begin
 
   -- Referral link: only for a brand-new activity, never from the user's own activities (trigger blocks those).
   if p_ref_code is not null and p_ref_code ~ '^[A-Za-z0-9]{6,12}$' then
-    select id into v_ref from public.organizations where lower(referral_code) = lower(p_ref_code) and id <> v_id;
-    if v_ref is not null then
+    begin
+      v_ref := public.resolve_referral_code(p_ref_code);
+    exception when others then
+      v_ref := null;   -- over the lookup limit: sign-up still succeeds, just without a referral
+    end;
+    if v_ref is not null and v_ref <> v_id then
       insert into public.referrals(referrer_org_id, referred_org_id, source, reward_bps)
       values (v_ref, v_id, 'link', 0) on conflict (referred_org_id) do nothing;
       insert into public.funnel_events(event, org_id) values ('referral_signup', v_ref);
@@ -390,6 +394,16 @@ language sql security definer set search_path = '' as $$
    where o.store_org_id = p_store and o.kind = 'campaign' and o.status = 'live' and o.ends_at > now()
   on conflict (opportunity_id, creator_org_id) do nothing;
 $$;
+
+-- Every new partnership (direct invite, catalogue, approval) joins the store's live campaigns.
+create function public.agreements_enroll_campaigns() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  perform public.enroll_live_campaigns(new.store_org_id, new.creator_org_id, new.id);
+  return new;
+end $$;
+create trigger agreements_enroll_campaigns after insert on public.agreements
+  for each row execute function public.agreements_enroll_campaigns();
 
 create function public.save_standing_opportunity(p_store uuid, p_title text, p_description text, p_commission_bps int,
                                                  p_coupon_pct int, p_auto_approve boolean, p_status text,
@@ -1355,10 +1369,42 @@ language sql stable security definer set search_path = '' as $$
      order by o.kind = 'campaign' desc, o.created_at desc limit 6) x;
 $$;
 
+-- Referral codes are only resolved for signed-in users, with per-user limits, so codes can't be enumerated:
+-- at most 30 lookups and 5 unknown codes per hour. The public /join link never reveals whether a code exists.
+create table public.lookup_attempts (
+  id bigint generated always as identity primary key,
+  user_id uuid not null,
+  kind text not null,
+  ok boolean not null,
+  at timestamptz not null default now()
+);
+create index lookup_attempts_user_idx on public.lookup_attempts(user_id, kind, at);
+alter table public.lookup_attempts enable row level security;   -- no client policies: internal only
+
+create function public.resolve_referral_code(p_code text) returns uuid
+language plpgsql security definer set search_path = '' as $$
+declare v_uid uuid := auth.uid(); v_id uuid;
+begin
+  if v_uid is null then raise exception 'not_authenticated' using errcode = '28000'; end if;
+  if (select count(*) from public.lookup_attempts where user_id = v_uid and kind = 'ref' and at > now() - interval '1 hour') >= 30
+     or (select count(*) from public.lookup_attempts where user_id = v_uid and kind = 'ref' and not ok and at > now() - interval '1 hour') >= 5 then
+    raise exception 'rate_limited' using errcode = '54000';
+  end if;
+  if p_code ~ '^[A-Za-z0-9]{6,12}$' then
+    select id into v_id from public.organizations where lower(referral_code) = lower(p_code);
+  end if;
+  insert into public.lookup_attempts(user_id, kind, ok) values (v_uid, 'ref', v_id is not null);
+  delete from public.lookup_attempts where at < now() - interval '2 days' and user_id = v_uid;
+  return v_id;
+end $$;
+
 create function public.referrer_name(p_code text) returns text
-language sql stable security definer set search_path = '' as $$
-  select name from public.organizations where p_code ~ '^[A-Za-z0-9]{6,12}$' and lower(referral_code) = lower(p_code);
-$$;
+language plpgsql security definer set search_path = '' as $$
+declare v_id uuid;
+begin
+  v_id := public.resolve_referral_code(p_code);
+  return (select name from public.organizations where id = v_id);
+end $$;
 
 /* ================= RLS for new tables ================= */
 alter table public.platform_admins enable row level security;
@@ -1467,8 +1513,9 @@ grant execute on function
   public.record_reward_transfer(uuid, text, text)
   to authenticated;
 grant execute on function public.get_public_proposal(text), public.resolve_partner_link(text),
-                          public.get_team_invite(text), public.public_catalog_preview(), public.referrer_name(text)
+                          public.get_team_invite(text), public.public_catalog_preview()
   to anon, authenticated;
+grant execute on function public.referrer_name(text) to authenticated;
 grant execute on function public.ingest_order_event(uuid, jsonb), public.plugin_sync(uuid, text),
                           public.plugin_sync_products(uuid, jsonb, timestamptz),
                           public.approve_matured_commissions(), public.platform_fee_report(timestamptz, timestamptz),

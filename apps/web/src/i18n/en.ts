@@ -2,10 +2,11 @@ import type { Dict } from "./he";
 
 export const en: Dict = {
   meta: {
-    title: "LINKUP — performance partnerships between online stores and creators",
+    title: "LINKUP — where stores and creators grow together",
     description: "Stores pay only for sales that really happened. Creators earn from every sale they drive. WooCommerce connection, coupons, links and commissions — all automatic.",
   },
   slogan: "Pay only for sales that really happened",
+  brand: "Where stores and creators grow together",
   common: {
     stores: "For stores", creators: "For creators", login: "Log in", logout: "Log out", start: "Start free",
     save: "Save", saved: "Saved", cancel: "Cancel", back: "Back", continue: "Continue", copy: "Copy", copied: "Copied ✓",
@@ -22,8 +23,8 @@ export const en: Dict = {
   },
   home: {
     eyebrow: "LINKUP · performance partnership platform",
-    title: "Stores sell more. Creators earn more. Everyone pays only for results.",
-    lead: "LINKUP connects online stores with creators. Every sale is measured automatically, every commission is transparent, and there is no monthly subscription.",
+    title: "Where stores and creators grow together.",
+    lead: "LINKUP connects online stores with creators and influencers. Stores get sales, creators earn from every sale, and every sale is measured automatically and transparently.",
     storeCard: { title: "I have a store", text: "Bring in creators who sell for you, and pay only for real sales.", cta: "For stores" },
     creatorCard: { title: "I'm a creator", text: "Pick stores and products, share your personal coupon, earn from every sale.", cta: "For creators" },
     howTitle: "How it works",

@@ -1,5 +1,8 @@
+import type { Metadata } from "next";
 import { PublicPage } from "@/components/Site";
 import { getT } from "@/i18n";
+
+export const metadata: Metadata = { robots: { index: false, follow: false } };
 
 // Placeholder until the lawyer-approved text is supplied (plan task T17). Shown honestly as a draft.
 export default async function Page() {

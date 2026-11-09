@@ -8,6 +8,7 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
   const { sb, org, t, locale } = ctx;
   const { data: conns } = await sb.from("store_connections").select("status, site_url, last_sync_at, plugin_version").eq("org_id", org.id).order("created_at", { ascending: false }).limit(1);
   const c = conns?.[0];
+  const { data: o } = await sb.from("organizations").select("website_url").eq("id", org.id).single();
   return (
     <AppShell ctx={ctx} active="settings" path="/app/connect">
       <div className="narrow">
@@ -19,7 +20,7 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
             {c.status === "connected" && <p className="small muted">{t.connect.rotateNote}</p>}
           </div>
         )}
-        <ConnectForm orgId={org.id} l={t.connect} errors={t.errors} defaultSite={c?.site_url ?? ""} rotate={c?.status === "connected"} />
+        <ConnectForm orgId={org.id} l={t.connect} errors={t.errors} defaultSite={c?.site_url ?? o?.website_url ?? ""} rotate={c?.status === "connected"} />
       </div>
     </AppShell>
   );
