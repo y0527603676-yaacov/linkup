@@ -39,3 +39,13 @@ The active store is never touched: no plugin change is required, events keep flo
 
 ## Not public yet
 Terms and privacy pages are drafts, marked "under legal review" and excluded from search engines (noindex).
+
+## Executed — 2026-11-09 (controlled technical deployment)
+1. Backup: in-database snapshot schema `backup_20261109` (all 17 public tables incl. connection secrets; counts verified) + local data export. Supabase daily backup (Pro) not visible via tools — confirm in dashboard.
+2. Migration `growth_catalog_billing` applied from the exact repo file (commit de77fb2, sha256 verified before execution).
+3. Invoice cron NOT applied (no real bills until commercial approval). Invoices can only be generated manually by the platform admin.
+4. Smoke: data unchanged (3 orgs, 3 orders, 4 ledger rows, 2 connections), Heleni dashboard OK, isolation OK (stranger sees 0 rows).
+5. Edge function `woo` v2 deployed; unauthenticated call → 401 (auth active).
+6. Platform admin: owner account.
+7. `full-build` merged to `main`; Vercel production deployment succeeded; public pages 200 in he/en; terms page noindex.
+Public sign-up: closed (`LINKUP_SIGNUPS_OPEN` not set) — existing accounts can log in.
