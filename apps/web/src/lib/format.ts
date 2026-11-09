@@ -1,39 +1,36 @@
-export function money(minor: number | null | undefined, currency = "ILS"): string {
-  return new Intl.NumberFormat("he-IL", { style: "currency", currency, maximumFractionDigits: 2 }).format((minor ?? 0) / 100);
+import type { Dict } from "@/i18n/he";
+
+type Loc = "he" | "en";
+const tag = (l: Loc) => (l === "he" ? "he-IL" : "en-IL");
+
+export function money(minor: number | string | null | undefined, currency = "ILS", locale: Loc = "he"): string {
+  return new Intl.NumberFormat(tag(locale), { style: "currency", currency, maximumFractionDigits: 2 }).format(Number(minor ?? 0) / 100);
 }
+export const pct = (bps: number, locale: Loc = "he") =>
+  `${(bps / 100).toLocaleString(tag(locale), { maximumFractionDigits: 2 })}%`;
+export const date = (iso: string | null | undefined, locale: Loc = "he") =>
+  iso ? new Date(iso).toLocaleDateString(tag(locale), { day: "numeric", month: "short", year: "numeric" }) : "—";
+export const shortDate = (iso: string | null | undefined, locale: Loc = "he") =>
+  iso ? new Date(iso).toLocaleDateString(tag(locale), { day: "numeric", month: "short" }) : "—";
 
-export const pct = (bps: number) => `${(bps / 100).toLocaleString("he-IL", { maximumFractionDigits: 2 })}%`;
+const KNOWN = new Set([
+  "forbidden", "not_authenticated", "invalid_url", "invalid_name", "invalid_type", "proposal_closed", "proposal_expired",
+  "wrong_org_type", "rate_limited", "not_found", "too_many_orgs", "unsupported_org_type", "not_a_store", "not_a_creator",
+  "bad_code", "email", "send_failed", "invalid_email", "invalid_role", "last_owner", "invite_invalid", "invite_email_mismatch",
+  "opportunity_closed", "self_deal", "already_decided", "invalid_dates", "too_many_campaigns", "store_not_connected",
+  "nothing_to_pay", "already_responded", "invalid_status", "below_minimum", "invoice_not_payable", "invoice_not_voidable",
+  "period_not_closed", "invalid_period", "setting_locked",
+]);
 
-export const date = (iso: string) => new Date(iso).toLocaleDateString("he-IL", { day: "numeric", month: "numeric", year: "2-digit" });
-
-const ERRORS: Record<string, string> = {
-  forbidden: "אין לך הרשאה לפעולה הזו.",
-  not_authenticated: "צריך להתחבר כדי להמשיך.",
-  invalid_url: "כתובת האתר לא תקינה. לדוגמה: myshop.co.il",
-  invalid_name: "השם קצר מדי.",
-  invalid_type: "סוג חשבון לא תקין.",
-  proposal_closed: "ההצעה הזו כבר אושרה או נדחתה.",
-  proposal_expired: "תוקף ההצעה פג. בקשו מהשולח הצעה חדשה.",
-  wrong_org_type: "ההצעה מיועדת לסוג חשבון אחר.",
-  rate_limited: "הגעתם למגבלת ההצעות היומית. נסו שוב מחר.",
-  not_found: "ההצעה לא נמצאה.",
-  too_many_orgs: "הגעתם למספר החשבונות המרבי.",
-  unsupported_org_type: "סוכנויות יוכלו לשלוח הצעות בשלב הבא.",
-  not_a_store: "רק חשבון חנות יכול לחבר אתר.",
-  bad_code: "הקוד שגוי או שפג תוקפו. בקשו קוד חדש.",
-  email: "כתובת המייל לא תקינה.",
-  send_failed: "לא הצלחנו לשלוח מייל כרגע. נסו שוב בעוד דקה.",
-};
-
-export function errorText(code: string | undefined | null): string | null {
+export function errorText(code: string | undefined | null, t: Dict): string | null {
   if (!code) return null;
-  return ERRORS[code] ?? "משהו השתבש. נסו שוב.";
+  return t.errors[code] ?? t.errors.unknown!;
 }
 
 /** Map a Supabase/PostgREST error to our short code. */
 export function errorCode(err: { message?: string } | null | undefined): string {
   const m = err?.message ?? "";
-  return Object.prototype.hasOwnProperty.call(ERRORS, m) ? m : "unknown";
+  return KNOWN.has(m) ? m : "unknown";
 }
 
 /** Only allow same-site relative redirects. */
@@ -42,4 +39,4 @@ export function safeNext(next: unknown, fallback = "/app"): string {
   return s.startsWith("/") && !s.startsWith("//") && !s.startsWith("/\\") ? s : fallback;
 }
 
-export const ORG_LABEL: Record<string, string> = { store: "חנות", creator: "משפיען/ית", agency: "סוכנות" };
+export const waLink = (text: string) => `https://wa.me/?text=${encodeURIComponent(text)}`;

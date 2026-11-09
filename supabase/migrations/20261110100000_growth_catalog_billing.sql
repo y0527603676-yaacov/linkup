@@ -542,6 +542,17 @@ begin
   return json_build_object('status', case when p_approve then 'approved' else 'rejected' end, 'code', v_res ->> 'code');
 end $$;
 
+create function public.pending_applications(p_store uuid) returns json
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  if not public.is_member(p_store) then raise exception 'forbidden' using errcode = '42501'; end if;
+  return coalesce((select json_agg(json_build_object('id', ap.id, 'creator', c.name, 'opportunity', o.title,
+                                                     'message', ap.message, 'created_at', ap.created_at) order by ap.created_at)
+                     from public.opportunity_applications ap join public.opportunities o on o.id = ap.opportunity_id
+                     join public.organizations c on c.id = ap.creator_org_id
+                    where o.store_org_id = p_store and ap.status = 'pending'), '[]');
+end $$;
+
 -- Creator catalogue: live opportunities of connected stores, with up to 4 in-stock products each.
 create function public.catalog(p_search text default null, p_kind text default null, p_limit int default 30) returns json
 language sql stable security definer set search_path = '' as $$
@@ -1247,6 +1258,27 @@ begin
   values (auth.uid(), 'setting.changed', p_key, jsonb_build_object('value', p_value));
 end $$;
 
+/* ================= Public (anon) helpers for landing pages ================= */
+-- Up to 6 real live opportunities with one in-stock product each. Never returns anything not already public
+-- on the store's own site (store name, product name/image/price) plus the published commission terms.
+create function public.public_catalog_preview() returns json
+language sql stable security definer set search_path = '' as $$
+  select coalesce(json_agg(x), '[]') from (
+    select o.kind, o.commission_bps, o.coupon_discount_pct, o.ends_at, s.name as store_name,
+           p.name as product_name, p.image_url, p.price_minor, p.currency
+      from public.opportunities o join public.organizations s on s.id = o.store_org_id
+      join lateral (select * from public.products p where p.store_org_id = s.id and p.status = 'active' and p.in_stock
+                       and p.image_url is not null order by p.synced_at desc limit 1) p on true
+     where o.status = 'live' and (o.ends_at is null or o.ends_at > now())
+       and exists (select 1 from public.store_connections c where c.org_id = s.id and c.status = 'connected')
+     order by o.kind = 'campaign' desc, o.created_at desc limit 6) x;
+$$;
+
+create function public.referrer_name(p_code text) returns text
+language sql stable security definer set search_path = '' as $$
+  select name from public.organizations where p_code ~ '^[A-Za-z0-9]{6,12}$' and lower(referral_code) = lower(p_code);
+$$;
+
 /* ================= RLS for new tables ================= */
 alter table public.platform_admins enable row level security;
 alter table public.team_invites enable row level security;
@@ -1339,6 +1371,7 @@ grant execute on function
   public.join_opportunity(uuid, uuid, text),
   public.decide_application(uuid, boolean),
   public.catalog(text, text, int),
+  public.pending_applications(uuid),
   public.mark_notifications_read(uuid),
   public.my_wallet(),
   public.record_creator_payout(uuid, uuid, text, text, text),
@@ -1353,7 +1386,8 @@ grant execute on function
   public.record_reward_transfer(uuid, text, text)
   to authenticated;
 grant execute on function public.get_public_proposal(text), public.resolve_partner_link(text),
-                          public.get_team_invite(text) to anon, authenticated;
+                          public.get_team_invite(text), public.public_catalog_preview(), public.referrer_name(text)
+  to anon, authenticated;
 grant execute on function public.ingest_order_event(uuid, jsonb), public.plugin_sync(uuid, text),
                           public.plugin_sync_products(uuid, jsonb, timestamptz),
                           public.approve_matured_commissions(), public.platform_fee_report(timestamptz, timestamptz),

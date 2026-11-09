@@ -1,22 +1,26 @@
-import { redirect } from "next/navigation";
-import { Shell } from "@/components/Shell";
-import { getMyOrgs, pickOrg } from "@/lib/orgs";
+import { AppShell, PageHead } from "@/components/AppShell";
+import { loadApp } from "@/lib/orgs";
+import { shortDate } from "@/lib/format";
 import { ConnectForm } from "./ConnectForm";
 
-type SP = Promise<Record<string, string | undefined>>;
-
-export default async function Connect({ searchParams }: { searchParams: SP }) {
-  const sp = await searchParams;
-  const orgs = await getMyOrgs();
-  const org = pickOrg(orgs.filter((o) => o.type === "store"), sp.org);
-  if (!org) redirect("/app/new?type=store");
+export default async function Connect({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
+  const ctx = await loadApp(await searchParams, "store");
+  const { sb, org, t, locale } = ctx;
+  const { data: conns } = await sb.from("store_connections").select("status, site_url, last_sync_at, plugin_version").eq("org_id", org.id).order("created_at", { ascending: false }).limit(1);
+  const c = conns?.[0];
   return (
-    <Shell org={org} orgs={orgs}>
+    <AppShell ctx={ctx} active="settings" path="/app/connect">
       <div className="narrow">
-        <h1>חיבור חנות WooCommerce</h1>
-        <p className="muted">3 צעדים, בערך 5 דקות. אחרי החיבור LINKUP יוצרת קופונים לשותפים וסופרת מכירות אוטומטית.</p>
-        <ConnectForm orgId={org.id} />
+        <PageHead title={t.connect.title} lead={t.connect.lead} />
+        {c && (
+          <div className="card card-flat" style={{ marginBottom: 16 }}>
+            <p className="row"><span className={`dot${c.status === "connected" ? "" : " dot-off"}`} /><b>{t.dash.connection[c.status]}</b> · <span className="ltr">{c.site_url}</span></p>
+            {c.last_sync_at && <p className="small muted">{t.dash.connection.lastSync}: {shortDate(c.last_sync_at, locale)}{c.plugin_version ? ` · v${c.plugin_version}` : ""}</p>}
+            {c.status === "connected" && <p className="small muted">{t.connect.rotateNote}</p>}
+          </div>
+        )}
+        <ConnectForm orgId={org.id} l={t.connect} errors={t.errors} defaultSite={c?.site_url ?? ""} rotate={c?.status === "connected"} />
       </div>
-    </Shell>
+    </AppShell>
   );
 }

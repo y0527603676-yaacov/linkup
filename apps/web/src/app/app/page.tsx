@@ -1,167 +1,109 @@
-import Link from "next/link";
-import { redirect } from "next/navigation";
-import { Alert, Shell } from "@/components/Shell";
-import { CopyButton } from "@/components/CopyButton";
-import { getMyOrgs, pickOrg } from "@/lib/orgs";
-import { getOrigin, getSupabase } from "@/lib/supabase/server";
-import { date, money, pct } from "@/lib/format";
+import { AppShell, NextAction, PageHead, Stat, Alert } from "@/components/AppShell";
+import { loadApp, type OrgStatus } from "@/lib/orgs";
+import { date, money, pct, shortDate } from "@/lib/format";
+import type { Dict } from "@/i18n/he";
 
-type SP = Promise<Record<string, string | undefined>>;
-/* eslint-disable @typescript-eslint/no-explicit-any */
+type Sale = { external_order_id?: string; order_created_at: string; status?: string; partner?: string; store_name?: string; method: string;
+  self_referral_suspected?: boolean; base_minor?: number; commission_minor: number };
 
-const STATUS: Record<string, string> = { sent: "נשלחה", opened: "נפתחה", accepted: "אושרה ✓", rejected: "נדחתה", withdrawn: "בוטלה" };
+function nextFor(s: OrgStatus, t: Dict, q: string) {
+  const n = t.next;
+  if (s.type === "store") {
+    if (!s.is_admin) return null;
+    if (!s.connected && !s.connection_pending) return { ...n.connect, href: `/app/connect${q}` };
+    if (!s.connected) return { ...n.pending, href: `/app/connect${q}` };
+    if (!s.standing_live) return { ...n.offer, href: `/app/offer${q}` };
+    if (s.pending_applications > 0) return { ...n.applications, t: n.applications.t(s.pending_applications), href: `/app/partners${q}` };
+    if (s.partners === 0) return { ...n.invite, href: `/app/invite${q}` };
+    if (s.open_invoices > 0) return { ...n.invoice, href: `/app/money${q}` };
+    if (s.approved_unpaid_minor > 0) return { ...n.payCreators, href: `/app/money${q}` };
+    if (s.sales === 0) return { ...n.waitSale, href: `/app/offer${q}#launch` };
+    return { ...n.growStore, href: `/app/rewards${q}` };
+  }
+  if (s.payouts_to_confirm > 0) return { ...n.confirmPayout, href: `/app/money${q}` };
+  if (s.partners === 0) return { ...n.catalog, href: `/app/catalog${q}` };
+  if (s.sales === 0) return { ...n.share, href: `/app/partnerships${q}` };
+  return { ...n.inviteStore, href: `/app/invite${q}` };
+}
 
-export default async function Home({ searchParams }: { searchParams: SP }) {
+export default async function Home({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const sp = await searchParams;
-  const orgs = await getMyOrgs();
-  if (orgs.length === 0) redirect("/app/new");
-  const org = pickOrg(orgs, sp.org)!;
-  const sb = await getSupabase();
-  const { data: d } = await sb.rpc("org_dashboard", { p_org: org.id });
-  const dash = d as any;
-  const origin = await getOrigin();
+  const ctx = await loadApp(sp);
+  const { sb, org, status, t, locale } = ctx;
+  const q = `?org=${org.id}`;
+  const { data } = await sb.rpc("org_dashboard", { p_org: org.id });
+  const d = (data ?? {}) as Record<string, any>;
+  const next = nextFor(status, t, q);
+  const sales = (d.recent_sales ?? []) as Sale[];
+  const cur = d.currency ?? "ILS";
 
   return (
-    <Shell org={org} orgs={orgs}>
-      {sp.accepted && <Alert kind="ok" text={org.type === "store" ? "השותפות פעילה! עכשיו חברו את החנות כדי שהקופון ייווצר." : "השותפות פעילה! הקישור והקופון שלך מוכנים למטה."} />}
-      {org.type === "store" && dash && <StoreHome org={org} d={dash} origin={origin} />}
-      {org.type === "creator" && dash && <CreatorHome org={org} d={dash} origin={origin} />}
-      {org.type === "agency" && (
-        <section className="card">
-          <h1>{org.name}</h1>
-          <p>ניהול משפיענים מיוצגים, פיצול עמלות והזמנת חנויות בשם המיוצגים נפתחים בשלב הבא.</p>
-          <p className="muted">בינתיים: משפיען/ית שאתם מייצגים יכול/ה לפתוח חשבון ולקבל הצעות מחנויות.</p>
+    <AppShell ctx={ctx} active="home" path="/app">
+      <PageHead title={org.name} lead={org.type === "store" && d.founders_until ? t.dash.founders(date(d.founders_until, locale)) : undefined} />
+      {sp.accepted && <Alert kind="ok" text={t.dash.accepted} />}
+      {next && <NextAction eyebrow={t.next.title} title={next.t} text={next.d} cta={next.cta} href={next.href} />}
+
+      {status.sales > 0 && (
+        <section className="section stats">
+          {org.type === "store" ? (
+            <>
+              <Stat label={t.dash.salesMonth} value={money(d.month_sales_minor, cur, locale)} />
+              <Stat label={t.dash.partners} value={d.active_partners} />
+              {status.is_admin && <Stat label={t.dash.approvedComm} value={money(d.approved_commissions_minor, cur, locale)} />}
+              {status.is_admin && <Stat label={t.dash.feeMonth} value={money(d.month_platform_fee_minor, cur, locale)} />}
+            </>
+          ) : (
+            <>
+              <Stat money label={t.dash.earningsMonth} value={money(d.month_earnings_minor, cur, locale)} />
+              <Stat label={t.dash.pending} value={money(d.pending_minor, cur, locale)} />
+              <Stat label={t.dash.approved} value={money(d.approved_minor, cur, locale)} />
+              <Stat label={t.dash.stores} value={d.active_stores} />
+            </>
+          )}
         </section>
       )}
-    </Shell>
-  );
-}
 
-function StoreHome({ org, d, origin }: { org: { id: string }; d: any; origin: string }) {
-  const c = d.connection;
-  const connected = c?.status === "connected";
-  return (
-    <>
-      <div className="hero-row">
-        <h1>{d.name}</h1>
-        <Link className="btn btn-primary" href={`/app/invite?org=${org.id}`}>+ הזמנת משפיען/ית</Link>
-      </div>
-      {!connected && (
-        <section className="card card-warn">
-          <strong>{c ? "ממתינים לחיבור התוסף" : "החנות עוד לא מחוברת"}</strong>
-          <p>בלי חיבור לא נוצרים קופונים ולא נספרות מכירות.</p>
-          <Link className="btn btn-ghost btn-sm" href={`/app/connect?org=${org.id}`}>{c ? "הוראות חיבור / מפתח חדש" : "חיבור החנות (5 דקות)"}</Link>
-        </section>
+      {org.type === "store" && d.connection && (
+        <p className="small muted section row">
+          <span className={`dot${d.connection.status === "connected" ? "" : " dot-off"}`} />
+          {t.dash.connection[d.connection.status]} · <span className="ltr">{d.connection.site_url}</span>
+          {d.connection.last_sync_at && <> · {t.dash.connection.lastSync}: {shortDate(d.connection.last_sync_at, locale)}</>}
+        </p>
       )}
-      <div className="stats">
-        <Stat label="מכירות משותפים החודש" value={money(d.month_sales_minor, d.currency)} />
-        <Stat label="עמלות ממתינות" value={money(d.pending_commissions_minor, d.currency)} hint="מאושרות אחרי חלון החזרות" />
-        <Stat label="לתשלום לשותפים" value={money(d.approved_commissions_minor, d.currency)} />
-        <Stat label="שותפים פעילים" value={String(d.active_partners)} />
-      </div>
-      <p className="muted small">עמלת LINKUP: {pct(d.fee_bps)} מהמכירות המיוחסות{d.founders_until ? ` (מחיר מייסדים עד ${date(d.founders_until)})` : ""} · החודש: {money(d.month_platform_fee_minor, d.currency)}</p>
 
-      <section className="card">
-        <h2>שותפים</h2>
-        {d.partners.length === 0 ? <Empty text="עדיין אין שותפים. שלחו הזמנה ראשונה — זה לוקח פחות מדקה." /> : (
-          <ul className="list">
-            {d.partners.map((p: any) => (
-              <li key={p.code ?? p.name}><span><strong>{p.name}</strong> · {pct(p.commission_bps)}</span><code dir="ltr">{p.code}</code></li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="card">
-        <h2>מכירות אחרונות</h2>
-        {d.recent_sales.length === 0 ? <Empty text="מכירות דרך שותפים יופיעו כאן אוטומטית." /> : (
-          <ul className="list">
-            {d.recent_sales.map((s: any) => (
-              <li key={s.external_order_id}>
-                <span>#{s.external_order_id} · {s.partner} · {s.method === "coupon" ? "קופון" : "קישור"}{s.self_referral_suspected ? " · ⚠️ ייתכן רכישה עצמית" : ""}<br /><small className="muted">{date(s.order_created_at)}</small></span>
-                <span className="num">{money(s.base_minor, d.currency)}<br /><small className="muted">עמלה {money(s.commission_minor, d.currency)}</small></span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <Proposals list={d.proposals} origin={origin} />
-    </>
-  );
-}
-
-function CreatorHome({ org, d, origin }: { org: { id: string }; d: any; origin: string }) {
-  return (
-    <>
-      <div className="hero-row">
-        <h1>{d.name}</h1>
-        <Link className="btn btn-primary" href={`/app/invite?org=${org.id}`}>+ הזמנת חנות</Link>
-      </div>
-      <div className="stats">
-        <Stat label="רווחים החודש" value={money(d.month_earnings_minor)} />
-        <Stat label="ממתין לאישור" value={money(d.pending_minor)} hint="אחרי חלון ההחזרות" />
-        <Stat label="מאושר לתשלום" value={money(d.approved_minor)} hint="החנות משלמת ישירות" />
-        <Stat label="חנויות פעילות" value={String(d.active_stores)} />
-      </div>
-
-      <section className="card">
-        <h2>הקישורים והקופונים שלך</h2>
-        {d.partnerships.length === 0 ? <Empty text="עדיין אין שותפויות. הזמינו חנות שאתם כבר אוהבים — ההצעה מוכנה תוך דקה." /> : (
-          <ul className="list">
-            {d.partnerships.map((p: any) => {
-              const link = `${origin}/r/${p.code}`;
-              return (
-                <li key={p.code} className="stacked">
-                  <span><strong>{p.store_name}</strong> · עמלה {pct(p.commission_bps)} · הנחה {p.coupon_discount_pct}%
-                    {!p.store_connected && <small className="muted"><br />הקופון יופעל ברגע שהחנות תסיים להתחבר</small>}</span>
-                  <div className="actions">
-                    <code dir="ltr">{p.code}</code>
-                    <CopyButton text={p.code} label="העתקת קופון" />
-                    <CopyButton text={link} label="העתקת קישור" />
+      {(status.partners > 0 || status.sales > 0) && (
+        <section className="section">
+          <div className="section-head"><h2>{t.dash.recentSales}</h2></div>
+          {sales.length === 0 ? <p className="empty">{t.dash.noSalesYet}</p> : (
+            <div className="list">
+              {sales.map((s, i) => (
+                <div className="item" key={i}>
+                  <div className="grow">
+                    <div className="title">{org.type === "store" ? s.partner : s.store_name}
+                      {s.self_referral_suspected && <> <span className="badge badge-warn">{t.dash.selfSuspect}</span></>}</div>
+                    <div className="meta">{shortDate(s.order_created_at, locale)} · {t.dash.via[s.method]}
+                      {s.external_order_id && <> · #{s.external_order_id}</>}
+                      {s.status && <> · {t.orderStatus[s.status] ?? s.status}</>}</div>
                   </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
+                  <div className="amount">{money(s.commission_minor, cur, locale)}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
-      <section className="card">
-        <h2>מכירות אחרונות</h2>
-        {d.recent_sales.length === 0 ? <Empty text="כל מכירה עם הקופון או הקישור שלך תופיע כאן." /> : (
-          <ul className="list">
-            {d.recent_sales.map((s: any, i: number) => (
-              <li key={i}><span>{s.store_name} · {s.method === "coupon" ? "קופון" : "קישור"}<br /><small className="muted">{date(s.order_created_at)}</small></span>
-                <span className="num">{money(s.commission_minor)}</span></li>
+      {org.type === "store" && (d.partners ?? []).length > 0 && (
+        <section className="section">
+          <div className="section-head"><h2>{t.dash.partners}</h2></div>
+          <div className="list">
+            {(d.partners as { name: string; code: string; commission_bps: number }[]).slice(0, 5).map((p) => (
+              <div className="item" key={p.code}><span className="title">{p.name}</span>
+                <span className="row"><span className="badge mono">{p.code}</span><span className="badge badge-money">{pct(p.commission_bps, locale)}</span></span></div>
             ))}
-          </ul>
-        )}
-      </section>
-
-      <Proposals list={d.proposals} origin={origin} />
-    </>
+          </div>
+        </section>
+      )}
+    </AppShell>
   );
 }
-
-function Proposals({ list, origin }: { list: any[]; origin: string }) {
-  if (!list?.length) return null;
-  return (
-    <section className="card">
-      <h2>הזמנות ששלחת</h2>
-      <ul className="list">
-        {list.map((p) => (
-          <li key={p.token}>
-            <span>{p.invitee_name ?? "ללא שם"} · {pct(p.commission_bps)}<br /><small className="muted">{STATUS[p.status] ?? p.status} · {date(p.created_at)}</small></span>
-            {p.status !== "accepted" && <CopyButton text={`${origin}/o/${p.token}`} label="העתקת קישור" />}
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
-const Stat = ({ label, value, hint }: { label: string; value: string; hint?: string }) => (
-  <div className="stat"><span className="muted small">{label}</span><strong>{value}</strong>{hint && <small className="muted">{hint}</small>}</div>
-);
-const Empty = ({ text }: { text: string }) => <p className="empty">{text}</p>;

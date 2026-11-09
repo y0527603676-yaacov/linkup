@@ -1,31 +1,47 @@
-import { Alert, Shell } from "@/components/Shell";
+import { cookies } from "next/headers";
+import Link from "next/link";
+import { Logo } from "@/components/Site";
+import { Alert } from "@/components/AppShell";
+import { getT } from "@/i18n";
+import { getSupabase } from "@/lib/supabase/server";
 import { errorText } from "@/lib/format";
 import { createOrg } from "../actions";
 
-type SP = Promise<Record<string, string | undefined>>;
-
-export default async function NewOrg({ searchParams }: { searchParams: SP }) {
+export default async function NewActivity({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const sp = await searchParams;
-  const type = sp.type ?? "store";
+  const { t } = await getT();
+  const o = t.onboarding;
+  const type = sp.type === "creator" ? "creator" : sp.type === "store" ? "store" : null;
+  const ref = (await cookies()).get("lk_ref")?.value;
+  let refName: string | null = null;
+  if (ref) { const { data } = await (await getSupabase()).rpc("referrer_name", { p_code: ref }); refName = (data as string) ?? null; }
   return (
-    <Shell>
-      <div className="narrow">
-        <h1>מי אתם?</h1>
-        <Alert text={errorText(sp.error)} />
-        <form action={createOrg} className="stack">
-          <input type="hidden" name="next" value={sp.next ?? ""} />
-          <fieldset className="choices">
-            <label><input type="radio" name="type" value="store" defaultChecked={type === "store"} /><span><strong>חנות אונליין</strong><small>רוצה משפיענים שמביאים מכירות</small></span></label>
-            <label><input type="radio" name="type" value="creator" defaultChecked={type === "creator"} /><span><strong>משפיען/ית</strong><small>רוצה להרוויח מקידום חנויות</small></span></label>
-            <label><input type="radio" name="type" value="agency" defaultChecked={type === "agency"} /><span><strong>סוכנות</strong><small>מנהלת משפיענים</small></span></label>
-          </fieldset>
-          <label className="field">
-            <span>שם (החנות / שלך / הסוכנות)</span>
-            <input name="name" required minLength={2} maxLength={80} />
-          </label>
-          <button className="btn btn-primary">המשך</button>
-        </form>
+    <div className="auth-wrap">
+      <div className="card stack">
+        <Logo href="/app" />
+        <h1>{o.title}</h1>
+        <p className="muted">{o.lead}</p>
+        {refName && <p className="badge badge-brand">{o.invitedBy(refName)}</p>}
+        <Alert text={errorText(sp.error, t)} />
+        <div className="pill-toggle" role="tablist">
+          <Link role="tab" className={type === "store" ? "on" : ""} href={`/app/new?type=store${sp.next ? `&next=${encodeURIComponent(sp.next)}` : ""}`}>{o.store.t}</Link>
+          <Link role="tab" className={type === "creator" ? "on" : ""} href={`/app/new?type=creator${sp.next ? `&next=${encodeURIComponent(sp.next)}` : ""}`}>{o.creator.t}</Link>
+        </div>
+        {type ? (
+          <form action={createOrg} className="stack">
+            <p className="muted small">{type === "store" ? o.store.d : o.creator.d}</p>
+            <input type="hidden" name="type" value={type} />
+            <input type="hidden" name="next" value={sp.next ?? ""} />
+            <label className="field"><span>{type === "store" ? o.storeName : o.creatorName}</span>
+              <input name="name" required minLength={2} maxLength={80} autoFocus /></label>
+            {type === "store" && (
+              <label className="field"><span>{o.website}</span>
+                <input name="website" dir="ltr" inputMode="url" placeholder="myshop.co.il" /></label>
+            )}
+            <button className="btn btn-primary btn-block">{o.create}</button>
+          </form>
+        ) : null}
       </div>
-    </Shell>
+    </div>
   );
 }
