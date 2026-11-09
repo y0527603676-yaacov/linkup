@@ -316,6 +316,6 @@ export const en: Dict = {
     store_not_connected: "A connected store is required.", nothing_to_pay: "No approved, unpaid commissions.", already_responded: "You already responded to this payment.",
     invalid_status: "Invalid status.", below_minimum: "The balance is below the transfer minimum.", invoice_not_payable: "This bill was already handled.",
     invoice_not_voidable: "A paid bill can't be voided.", period_not_closed: "This month hasn't ended yet.", invalid_period: "Invalid period.",
-    setting_locked: "This setting changes only by explicit decision.", join_standing_first: "This store approves new partners manually. Request to join its standing offer first.", invalid_setting: "Invalid value.", unknown: "Something went wrong. Please try again.",
+    setting_locked: "This setting changes only by explicit decision.", join_standing_first: "This store approves new partners manually. Request to join its standing offer first.", invalid_setting: "Invalid value.", signups_closed: "Sign-up to LINKUP opens soon. Existing users can log in as usual.", unknown: "Something went wrong. Please try again.",
   },
 };

@@ -315,7 +315,7 @@ export const he = {
     store_not_connected: "צריך חנות מחוברת.", nothing_to_pay: "אין עמלות מאושרות שטרם שולמו.", already_responded: "כבר הגבת על התשלום הזה.",
     invalid_status: "סטטוס לא תקין.", below_minimum: "היתרה מתחת למינימום להעברה.", invoice_not_payable: "החשבון כבר טופל.",
     invoice_not_voidable: "אי אפשר לבטל חשבון ששולם.", period_not_closed: "החודש עוד לא הסתיים.", invalid_period: "תקופה לא תקינה.",
-    setting_locked: "הגדרה זו משתנה רק בהחלטה מפורשת.", join_standing_first: "החנות מאשרת שותפים חדשים ידנית. בקשו להצטרף להצעה הקבועה שלה קודם.", invalid_setting: "ערך לא תקין.", unknown: "משהו השתבש. נסו שוב.",
+    setting_locked: "הגדרה זו משתנה רק בהחלטה מפורשת.", join_standing_first: "החנות מאשרת שותפים חדשים ידנית. בקשו להצטרף להצעה הקבועה שלה קודם.", invalid_setting: "ערך לא תקין.", signups_closed: "ההרשמה ל-LINKUP תיפתח בקרוב. משתמשים קיימים יכולים להיכנס כרגיל.", unknown: "משהו השתבש. נסו שוב.",
   } as Record<string, string>,
 };
 export type Dict = typeof he;

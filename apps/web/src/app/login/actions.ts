@@ -11,11 +11,17 @@ export async function sendLink(form: FormData) {
   }
   const sb = await getSupabase();
   const origin = await getOrigin();
+  // Public sign-up stays closed until the login-code e-mail test passes (set LINKUP_SIGNUPS_OPEN=true in Vercel).
+  // Until then only existing accounts can log in.
+  const open = process.env.LINKUP_SIGNUPS_OPEN === "true";
   const { error } = await sb.auth.signInWithOtp({
     email,
-    options: { emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(next)}` },
+    options: { shouldCreateUser: open, emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(next)}` },
   });
-  if (error) redirect(`/login?error=send_failed&next=${encodeURIComponent(next)}`);
+  if (error) {
+    const closed = !open && /signups? not allowed|not found|otp_disabled/i.test(`${error.message} ${(error as { code?: string }).code ?? ""}`);
+    redirect(`/login?error=${closed ? "signups_closed" : "send_failed"}&next=${encodeURIComponent(next)}`);
+  }
   redirect(`/login?sent=1&email=${encodeURIComponent(email)}&next=${encodeURIComponent(next)}`);
 }
 

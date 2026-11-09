@@ -19,7 +19,7 @@ const KNOWN = new Set([
   "bad_code", "email", "send_failed", "invalid_email", "invalid_role", "last_owner", "invite_invalid", "invite_email_mismatch",
   "opportunity_closed", "self_deal", "already_decided", "invalid_dates", "too_many_campaigns", "store_not_connected",
   "nothing_to_pay", "already_responded", "invalid_status", "below_minimum", "invoice_not_payable", "invoice_not_voidable",
-  "period_not_closed", "invalid_period", "setting_locked", "join_standing_first", "invalid_setting",
+  "period_not_closed", "invalid_period", "setting_locked", "join_standing_first", "invalid_setting", "signups_closed",
 ]);
 
 export function errorText(code: string | undefined | null, t: Dict): string | null {
