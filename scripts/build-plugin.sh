@@ -8,3 +8,5 @@ rm -f "$OUT/linkup-connector.zip"
 cd "$ROOT/plugins/woocommerce"
 zip -qr "$OUT/linkup-connector.zip" linkup-connector -x '*.DS_Store'
 echo "built $OUT/linkup-connector.zip"
+# Previous release kept downloadable for rollback (WordPress → Plugins → Add New → Upload → "Replace current with uploaded").
+cp "$ROOT/plugins/woocommerce/releases/linkup-connector-0.2.1.zip" "$OUT/linkup-connector-0.2.1.zip"
