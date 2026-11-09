@@ -26,7 +26,7 @@ export function AppShell({ ctx, active, children, path }: { ctx: Ctx; active: Na
     k === "partners" && status.pending_applications ? status.pending_applications
     : k === "money" && (status.open_invoices || status.payouts_to_confirm) ? status.open_invoices + status.payouts_to_confirm
     : 0;
-  const visible = (k: NavKey) => status.is_admin || !["team", "money", "settings"].includes(k) || (k === "money" && !isStore);
+  const visible = (k: NavKey) => status.is_admin || !["team", "money", "settings", "rewards"].includes(k);
 
   return (
     <div className="app">

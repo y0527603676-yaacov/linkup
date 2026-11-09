@@ -219,6 +219,14 @@ describe("LINKUP LAUNCH campaigns", () => {
     const a2 = (await q(`select commission_bps, campaign_id from attributions a join orders o on o.id = a.order_id where o.external_order_id = 'camp-2'`))[0];
     expect(a2).toMatchObject({ commission_bps: 1000, campaign_id: null });
   });
+  it("a creator who partners with the store during a live campaign is enrolled in it", async () => {
+    const live = await rpc(u.a!, "create_campaign", { p_store: org.A, p_title: "Week two", p_description: null, p_commission_bps: 1800,
+      p_starts_at: ago(0.01).toISOString(), p_ends_at: new Date(Date.now() + 3 * 86_400_000).toISOString() });
+    const opp = (await q(`select id from opportunities where store_org_id = $1 and kind = 'standing'`, [org.A]))[0]!.id;
+    await rpc(u.e!, "join_opportunity", { p_opportunity: opp, p_creator: org.E });
+    expect(await q(`select status from opportunity_applications where opportunity_id = $1 and creator_org_id = $2`, [live, org.E])).toEqual([{ status: "approved" }]);
+    await rpc(u.a!, "set_opportunity_status", { p_opportunity: live, p_status: "ended" });
+  });
   it("the store fee is never taken from the creator's commission", async () => {
     const l = await q(`select party_role, sum(amount_minor)::int as t from commission_ledger l join attributions a on a.id = l.attribution_id
                         join orders o on o.id = a.order_id where o.external_order_id = 'camp-2' group by 1 order by 1`);
@@ -328,6 +336,7 @@ describe("FOUNDING PARTNERS windows", () => {
     const attr = await attrOf("de-1");
     expect(await shares(attr)).toHaveLength(1);
     await backdate(`update orders set order_created_at = order_created_at - interval '120 days' where external_order_id = 'de-1'`);
+    await backdate(`update referrals set created_at = created_at - interval '130 days' where referred_org_id in ($1, $2)`, [org.D, org.E]);
     await ingest("D", "de-2", { coupons: [code.E] });
     expect(await shares(await attrOf("de-2"))).toEqual([]);
   });
@@ -370,8 +379,9 @@ describe("wallet & privacy", () => {
   });
   it("transfers only above the minimum; rewards are never visible to other users", async () => {
     await expect(rpc(u.admin!, "record_reward_transfer", { p_org: org.R, p_currency: "ILS", p_reference: "x" })).rejects.toThrow(/below_minimum/);
-    expect(await db.as(u.stranger!, `select 1 from referral_rewards`)).toHaveLength(0);
-    expect(await db.as(u.a!, `select 1 from referral_rewards`)).toHaveLength(0);
+    // Row-level reward detail is not readable by any client (would reveal per-order sales of the referred party).
+    await expect(db.as(u.stranger!, `select 1 from referral_rewards`)).rejects.toThrow(/permission denied/);
+    await expect(db.as(u.r!, `select 1 from referral_rewards`)).rejects.toThrow(/permission denied/);
   });
   it("a store's positive wallet balance is credited against its next payment request", async () => {
     // Ref Store (B) earned 160 as referrer; give it its own approved fee and bill it.
@@ -412,5 +422,48 @@ describe("platform admin guards", () => {
     const s = await rpc(u.a!, "org_status", { p_org: org.A });
     expect(s).toMatchObject({ type: "store", connected: true, standing_live: true, is_admin: true });
     expect(s.partners).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("review hardening", () => {
+  it("staff never receive money figures from the dashboard, balances or status", async () => {
+    const d = await rpc(u.staff!, "org_dashboard", { p_org: org.A });
+    expect(d.approved_commissions_minor).toBeUndefined();
+    expect(d.month_platform_fee_minor).toBeUndefined();
+    expect(JSON.stringify(d.recent_sales)).not.toContain("commission_minor");
+    await expect(rpc(u.staff!, "payout_balances", { p_org: org.A })).rejects.toThrow(/forbidden/);
+    expect((await rpc(u.staff!, "org_status", { p_org: org.A })).approved_unpaid_minor).toBe(0);
+    const full = await rpc(u.a!, "org_dashboard", { p_org: org.A });
+    expect(full.approved_commissions_minor).toBeDefined();
+  });
+  it("two referrers on a tiny fee never exceed 40% in total (rounding goes down)", async () => {
+    // fee line of 3 minor units with two referrers: 40% = 1.2 → total 1, not 2
+    const n = await q<{ total: number }>(`select floor(3::numeric * 4000 / 10000)::int as total`);
+    expect(n[0]!.total).toBe(1);
+    const rows = await q<{ s: number }>(`select coalesce(sum(amount_minor), 0)::int as s from referral_rewards`);
+    const fees = await q<{ f: number }>(`select coalesce(sum(ii.amount_minor), 0)::int as f from invoice_items ii join invoices i on i.id = ii.invoice_id where i.status = 'paid'`);
+    expect(rows[0]!.s).toBeLessThanOrEqual(Math.floor(fees[0]!.f * 0.4));
+  });
+  it("pricing switches cannot be changed at runtime; settings are type-checked", async () => {
+    await expect(rpc(u.admin!, "admin_set_setting", { p_key: "founders_open", p_value: "false" })).rejects.toThrow(/setting_locked/);
+    await expect(rpc(u.admin!, "admin_set_setting", { p_key: "founding_partners_open", p_value: '"x"' })).rejects.toThrow(/invalid_setting/);
+    await expect(rpc(u.admin!, "admin_set_setting", { p_key: "reward_transfer_min_minor", p_value: "-5" })).rejects.toThrow(/invalid_setting/);
+  });
+  it("a new creator cannot use a campaign to bypass a store's manual approval", async () => {
+    const opp = (await q(`select id from opportunities where store_org_id = $1 and kind = 'standing'`, [org.B]))[0]!.id;
+    await rpc(u.b!, "set_opportunity_status", { p_opportunity: opp, p_status: "live" });
+    const camp = await rpc(u.b!, "create_campaign", { p_store: org.B, p_title: "B push", p_description: null, p_commission_bps: 2500,
+      p_starts_at: ago(0.01).toISOString(), p_ends_at: new Date(Date.now() + 86_400_000).toISOString() });
+    const x = await rpc(u.stranger!, "create_organization", { p_type: "creator", p_name: "Newbie" });
+    await expect(rpc(u.stranger!, "join_opportunity", { p_opportunity: camp, p_creator: x })).rejects.toThrow(/join_standing_first/);
+  });
+  it("joining a standing offer never overwrites a partner's negotiated terms", async () => {
+    const before = await q(`select count(*)::int as n from agreement_versions v join agreements a on a.id = v.agreement_id where a.store_org_id = $1 and a.creator_org_id = $2`, [org.A, org.C]);
+    const opp = (await q(`select id from opportunities where store_org_id = $1 and kind = 'standing'`, [org.A]))[0]!.id;
+    await rpc(u.a!, "save_standing_opportunity", { p_store: org.A, p_title: "New terms", p_description: null, p_commission_bps: 700,
+      p_coupon_pct: 5, p_auto_approve: true, p_status: "live" });
+    await rpc(u.c!, "join_opportunity", { p_opportunity: opp, p_creator: org.C });
+    const after = await q(`select count(*)::int as n from agreement_versions v join agreements a on a.id = v.agreement_id where a.store_org_id = $1 and a.creator_org_id = $2`, [org.A, org.C]);
+    expect(after).toEqual(before);
   });
 });

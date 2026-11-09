@@ -27,8 +27,8 @@ alter table public.organizations add column if not exists referral_code text;
 alter table public.organizations add column if not exists locale text not null default 'he' check (locale in ('he', 'en'));
 alter table public.organizations add column if not exists logo_url text;
 alter table public.organizations add column if not exists description text check (char_length(description) <= 500);
-update public.organizations set referral_code = upper(public.random_token(8)) where referral_code is null;
-alter table public.organizations alter column referral_code set default upper(public.random_token(8));
+update public.organizations set referral_code = upper(public.random_token(10)) where referral_code is null;
+alter table public.organizations alter column referral_code set default upper(public.random_token(10));
 alter table public.organizations alter column referral_code set not null;
 create unique index if not exists organizations_referral_code_uq on public.organizations(lower(referral_code));
 
@@ -48,8 +48,8 @@ alter table public.referrals add column if not exists status text not null defau
   check (status in ('active', 'blocked'));
 alter table public.referrals drop constraint if exists referrals_source_check;
 alter table public.referrals add constraint referrals_source_check check (source in ('proposal', 'partner_page', 'import', 'link'));
--- Pre-program referrals (created in tests under the old 10% rule) never earn FOUNDING PARTNERS rewards.
-update public.referrals set program = 'legacy' where created_at < '2026-11-10';
+-- Every referral that exists before this migration (old 10% rule, pilot tests) is legacy: never earns FOUNDING PARTNERS rewards.
+update public.referrals set program = 'legacy';
 
 create function public.referrals_before_insert() returns trigger
 language plpgsql security definer set search_path = '' as $$
@@ -382,6 +382,15 @@ begin
   return json_build_object('agreement_id', v_ag, 'version', v_ver, 'code', v_code, 'created', v_ver = 1);
 end $$;
 
+-- A new partner of a store joins the store's live campaigns automatically (same as existing partners at launch).
+create function public.enroll_live_campaigns(p_store uuid, p_creator uuid, p_agreement uuid) returns void
+language sql security definer set search_path = '' as $$
+  insert into public.opportunity_applications(opportunity_id, creator_org_id, status, agreement_id, decided_at)
+  select o.id, p_creator, 'approved', p_agreement, now() from public.opportunities o
+   where o.store_org_id = p_store and o.kind = 'campaign' and o.status = 'live' and o.ends_at > now()
+  on conflict (opportunity_id, creator_org_id) do nothing;
+$$;
+
 create function public.save_standing_opportunity(p_store uuid, p_title text, p_description text, p_commission_bps int,
                                                  p_coupon_pct int, p_auto_approve boolean, p_status text,
                                                  p_product_ids uuid[] default '{}') returns uuid
@@ -489,23 +498,33 @@ begin
   end if;
 
   if o.auto_approve then
+    select id into v_ag from public.agreements where store_org_id = o.store_org_id and creator_org_id = p_creator and status = 'active';
     if o.kind = 'standing' then
-      v_res := public.upsert_agreement_terms(o.store_org_id, p_creator, o.commission_bps, o.coupon_discount_pct, o.attribution_days);
+      -- An existing (possibly negotiated) partnership keeps its terms; joining never overwrites them.
+      if v_ag is null then
+        v_res := public.upsert_agreement_terms(o.store_org_id, p_creator, o.commission_bps, o.coupon_discount_pct, o.attribution_days);
+      else
+        v_res := json_build_object('agreement_id', v_ag, 'code',
+                   (select code from public.partner_codes where agreement_id = v_ag and active order by created_at desc limit 1));
+      end if;
     else
       -- Campaign: join with the store's standing terms (or keep existing terms); the campaign rate applies during the campaign.
-      select id into v_ag from public.agreements where store_org_id = o.store_org_id and creator_org_id = p_creator and status = 'active';
       if v_ag is null then
+        -- New creators may join through a campaign only when the store accepts new partners automatically.
         select * into v_std from public.opportunities where store_org_id = o.store_org_id and kind = 'standing';
-        v_res := public.upsert_agreement_terms(o.store_org_id, p_creator,
-                   coalesce(v_std.commission_bps, (select default_commission_bps from public.organizations where id = o.store_org_id)),
-                   coalesce(v_std.coupon_discount_pct, 10), coalesce(v_std.attribution_days, 30));
+        if v_std.id is null or v_std.status <> 'live' or not v_std.auto_approve then
+          raise exception 'join_standing_first' using errcode = '22023';
+        end if;
+        v_res := public.upsert_agreement_terms(o.store_org_id, p_creator, v_std.commission_bps, v_std.coupon_discount_pct, v_std.attribution_days);
       else
-        v_res := json_build_object('agreement_id', v_ag);
+        v_res := json_build_object('agreement_id', v_ag,
+                   'code', (select code from public.partner_codes where agreement_id = v_ag and active order by created_at desc limit 1));
       end if;
     end if;
     insert into public.opportunity_applications(opportunity_id, creator_org_id, status, message, agreement_id, decided_at)
     values (o.id, p_creator, 'approved', nullif(btrim(coalesce(p_message, '')), ''), (v_res ->> 'agreement_id')::uuid, now())
     returning id into v_app;
+    perform public.enroll_live_campaigns(o.store_org_id, p_creator, (v_res ->> 'agreement_id')::uuid);
     v_status := 'approved';
   else
     insert into public.opportunity_applications(opportunity_id, creator_org_id, status, message)
@@ -533,6 +552,7 @@ begin
     v_res := public.upsert_agreement_terms(o.store_org_id, a.creator_org_id, o.commission_bps, o.coupon_discount_pct, o.attribution_days);
     update public.opportunity_applications set status = 'approved', decided_at = now(),
            agreement_id = (v_res ->> 'agreement_id')::uuid where id = a.id;
+    perform public.enroll_live_campaigns(o.store_org_id, a.creator_org_id, (v_res ->> 'agreement_id')::uuid);
   else
     update public.opportunity_applications set status = 'rejected', decided_at = now() where id = a.id;
   end if;
@@ -806,6 +826,7 @@ begin
      and exists (select 1 from public.commission_ledger x where x.attribution_id = l.attribution_id
                    and x.party_role = l.party_role and x.state = 'approved' and x.id <> l.id);
   get diagnostics m = row_count;
+  perform public.settle_reward_reversals();
   return n + m;
 end $$;
 
@@ -843,7 +864,8 @@ create table public.referral_rewards (
   id uuid primary key default gen_random_uuid(),
   referral_id uuid not null references public.referrals(id),
   referrer_org_id uuid not null references public.organizations(id),
-  invoice_item_id uuid not null references public.invoice_items(id),
+  invoice_item_id uuid references public.invoice_items(id),
+  ledger_id uuid not null references public.commission_ledger(id),
   attribution_id uuid not null references public.attributions(id),
   share_bps int not null check (share_bps between 0 and 5000),
   amount_minor bigint not null check (amount_minor <> 0),
@@ -876,10 +898,12 @@ language sql stable security definer set search_path = '' as $$
 $$;
 
 -- First qualifying sale of an activity (as store or as creator); self-referral-suspected sales don't count.
-create function public.first_sale_at(p_org uuid) returns timestamptz
+create function public.first_sale_at(p_org uuid, p_after timestamptz) returns timestamptz
 language sql stable security definer set search_path = '' as $$
   select min(o.order_created_at) from public.attributions a join public.orders o on o.id = a.order_id
-   where (a.store_org_id = p_org or a.creator_org_id = p_org) and not a.self_referral_suspected;
+   where (a.store_org_id = p_org or a.creator_org_id = p_org) and not a.self_referral_suspected
+     and o.order_created_at >= p_after
+     and public.effective_base_minor(o.status, o.total_minor, o.base_minor, o.refunded_minor) > 0;
 $$;
 
 -- Who earns from a given sale, and what share of the LINKUP fee.
@@ -897,7 +921,7 @@ begin
   select order_created_at into v_sale from public.orders where id = a.order_id;
   return query
   with cand as (
-    select r.id, r.referrer_org_id, r.reward_bps, public.first_sale_at(r.referred_org_id) as fs, r.reward_until
+    select r.id, r.referrer_org_id, r.reward_bps, public.first_sale_at(r.referred_org_id, r.created_at) as fs, r.reward_until
       from public.referrals r
      where r.referred_org_id in (a.store_org_id, a.creator_org_id)
        and r.program = 'founding_partners' and r.status = 'active' and r.reward_bps > 0
@@ -913,22 +937,31 @@ begin
   select p.id, p.referrer_org_id, (p.reward_bps / (select count(*) from per_ref))::int from per_ref p;
 end $$;
 
--- Rewards are created only from collected revenue: when an invoice is marked paid. Idempotent.
+-- Rewards are created only from collected revenue: when an invoice is marked paid. Idempotent (one row per
+-- fee line and referrer). Rounding always goes down and the split gives the remainder to the last referrer,
+-- so the total never exceeds 40% of the fee line.
 create function public.settle_invoice_rewards(p_invoice uuid) returns int
 language plpgsql security definer set search_path = '' as $$
-declare it record; s record; n int := 0; v_amt bigint; v_inserted uuid;
+declare it record; s record; n int := 0; v_total bigint; v_given bigint; v_amt bigint; v_left int; v_inserted uuid;
 begin
-  for it in select ii.id, ii.amount_minor, l.attribution_id, i.currency
+  for it in select ii.id, ii.ledger_id, ii.amount_minor, l.attribution_id, i.currency
               from public.invoice_items ii join public.invoices i on i.id = ii.invoice_id
               join public.commission_ledger l on l.id = ii.ledger_id
              where ii.invoice_id = p_invoice and i.status = 'paid' loop
-    for s in select * from public.referral_shares(it.attribution_id) loop
-      v_amt := round(it.amount_minor::numeric * s.share_bps / 10000)::bigint;
+    select floor(it.amount_minor::numeric * coalesce(sum(x.share_bps), 0) / 10000)::bigint, count(*)
+      into v_total, v_left from public.referral_shares(it.attribution_id) x;
+    v_given := 0;
+    for s in select * from public.referral_shares(it.attribution_id) order by referrer_org_id loop
+      v_left := v_left - 1;
+      v_amt := case when v_left = 0 then v_total - v_given
+                    else floor(it.amount_minor::numeric * s.share_bps / 10000)::bigint end;
+      v_given := v_given + v_amt;
       continue when v_amt = 0;
-      insert into public.referral_rewards(referral_id, referrer_org_id, invoice_item_id, attribution_id, share_bps,
+      v_inserted := null;
+      insert into public.referral_rewards(referral_id, referrer_org_id, invoice_item_id, ledger_id, attribution_id, share_bps,
                                           amount_minor, currency, idempotency_key)
-      values (s.referral_id, s.referrer_org_id, it.id, it.attribution_id, s.share_bps, v_amt, it.currency,
-              'inv:' || it.id::text || ':' || s.referrer_org_id::text)
+      values (s.referral_id, s.referrer_org_id, it.id, it.ledger_id, it.attribution_id, s.share_bps, v_amt, it.currency,
+              'led:' || it.ledger_id::text || ':' || s.referrer_org_id::text)
       on conflict (idempotency_key) do nothing
       returning id into v_inserted;
       if v_inserted is not null then
@@ -938,6 +971,33 @@ begin
           insert into public.funnel_events(event, org_id) values ('reward_earned', s.referrer_org_id);
         end if;
       end if;
+    end loop;
+  end loop;
+  return n;
+end $$;
+
+-- A refund after a reward was paid out is reversed as soon as its correcting fee line is approved — it does not
+-- wait for a future (possibly never paid) invoice. Mirrors the shares actually used, never below zero per sale.
+create function public.settle_reward_reversals() returns int
+language plpgsql security definer set search_path = '' as $$
+declare l record; r record; n int := 0; v_amt bigint; v_net bigint;
+begin
+  for l in select cl.* from public.commission_ledger cl
+            where cl.party_role = 'platform' and cl.state = 'approved' and cl.amount_minor < 0
+              and exists (select 1 from public.referral_rewards rr where rr.attribution_id = cl.attribution_id)
+              and not exists (select 1 from public.referral_rewards rr where rr.ledger_id = cl.id) loop
+    for r in select rr.referral_id, rr.referrer_org_id, max(rr.share_bps) as share_bps, sum(rr.amount_minor) as net, max(rr.currency) as currency
+               from public.referral_rewards rr where rr.attribution_id = l.attribution_id
+              group by rr.referral_id, rr.referrer_org_id loop
+      v_net := r.net;
+      v_amt := greatest(floor(l.amount_minor::numeric * r.share_bps / 10000)::bigint, -v_net);
+      continue when v_amt >= 0;
+      insert into public.referral_rewards(referral_id, referrer_org_id, invoice_item_id, ledger_id, attribution_id, share_bps,
+                                          amount_minor, currency, idempotency_key)
+      values (r.referral_id, r.referrer_org_id, null, l.id, l.attribution_id, r.share_bps, v_amt, r.currency,
+              'led:' || l.id::text || ':' || r.referrer_org_id::text)
+      on conflict (idempotency_key) do nothing;
+      n := n + 1;
     end loop;
   end loop;
   return n;
@@ -959,6 +1019,7 @@ begin
            having sum(l.amount_minor) > 0 loop
     continue when exists (select 1 from public.invoices where store_org_id = r.store_org_id and period_start = p_period_start
                                                           and currency = r.currency and status <> 'void');
+    perform 1 from public.organizations where id = r.store_org_id for update;   -- serialises with reward transfers
     v_credit := least(r.fees, greatest(0, public.wallet_balance_minor(r.store_org_id, r.currency)));
     insert into public.invoices(store_org_id, period_start, currency, fees_minor, credit_minor, total_minor, status, paid_at)
     values (r.store_org_id, p_period_start, r.currency, r.fees, v_credit, r.fees - v_credit,
@@ -976,7 +1037,7 @@ begin
     end if;
     if r.fees - v_credit = 0 then perform public.settle_invoice_rewards(v_inv); end if;
     insert into public.notifications(org_id, kind, payload)
-    values (r.store_org_id, 'invoice_issued', jsonb_build_object('invoice_id', v_inv, 'total_minor', r.fees - v_credit, 'currency', r.currency));
+    values (r.store_org_id, 'invoice_issued', jsonb_build_object('invoice_id', v_inv));
     n := n + 1;
   end loop;
   return n;
@@ -1027,7 +1088,7 @@ begin
   if v_bal < public.setting_int('reward_transfer_min_minor') then raise exception 'below_minimum' using errcode = '22023'; end if;
   insert into public.reward_payouts(org_id, currency, amount_minor, method, reference, created_by)
   values (p_org, p_currency, v_bal, 'transfer', nullif(btrim(coalesce(p_reference, '')), ''), auth.uid());
-  insert into public.notifications(org_id, kind, payload) values (p_org, 'reward_paid', jsonb_build_object('amount_minor', v_bal, 'currency', p_currency));
+  insert into public.notifications(org_id, kind, payload) values (p_org, 'reward_paid', '{}');
   insert into public.audit_events(actor_user_id, org_id, action, details)
   values (auth.uid(), p_org, 'reward.transferred', jsonb_build_object('amount_minor', v_bal, 'currency', p_currency));
   return v_bal;
@@ -1052,12 +1113,12 @@ language sql stable security definer set search_path = '' as $$
     'referrals', coalesce((select json_agg(json_build_object(
         'name', ro.name, 'type', ro.type, 'joined_at', r.created_at, 'via', r.referrer_org_id,
         'state', case when r.status = 'blocked' or r.program <> 'founding_partners' then 'not_eligible'
-                      when public.first_sale_at(ro.id) is null and r.reward_until < now() then 'expired'
-                      when public.first_sale_at(ro.id) is null then 'waiting_first_sale'
-                      when public.first_sale_at(ro.id) > r.reward_until then 'expired'
-                      when public.first_sale_at(ro.id) + make_interval(days => public.setting_int('referral_reward_days')) > now() then 'earning'
+                      when public.first_sale_at(ro.id, r.created_at) is null and r.reward_until < now() then 'expired'
+                      when public.first_sale_at(ro.id, r.created_at) is null then 'waiting_first_sale'
+                      when public.first_sale_at(ro.id, r.created_at) > r.reward_until then 'expired'
+                      when public.first_sale_at(ro.id, r.created_at) + make_interval(days => public.setting_int('referral_reward_days')) > now() then 'earning'
                       else 'completed' end,
-        'earning_until', public.first_sale_at(ro.id) + make_interval(days => public.setting_int('referral_reward_days')),
+        'earning_until', public.first_sale_at(ro.id, r.created_at) + make_interval(days => public.setting_int('referral_reward_days')),
         'first_sale_deadline', r.reward_until,
         'earned_minor', coalesce((select sum(rr.amount_minor) from public.referral_rewards rr where rr.referral_id = r.id), 0))
         order by r.created_at desc)
@@ -1116,8 +1177,7 @@ begin
      and l.state = 'approved' and l.currency = p_currency
      and not exists (select 1 from public.creator_payout_items i where i.ledger_id = l.id);
   insert into public.notifications(org_id, kind, payload)
-  values (p_creator, 'payout_marked', jsonb_build_object('payout_id', v_id, 'amount_minor', v_sum, 'currency', p_currency,
-                                                         'store', (select name from public.organizations where id = p_store)));
+  values (p_creator, 'payout_marked', jsonb_build_object('payout_id', v_id, 'store', (select name from public.organizations where id = p_store)));
   insert into public.audit_events(actor_user_id, org_id, action, target, details)
   values (auth.uid(), p_store, 'creator_payout.recorded', v_id::text, jsonb_build_object('amount_minor', v_sum));
   return json_build_object('payout_id', v_id, 'amount_minor', v_sum);
@@ -1142,7 +1202,7 @@ create function public.payout_balances(p_org uuid) returns json
 language plpgsql stable security definer set search_path = '' as $$
 declare v_type text;
 begin
-  if not public.is_member(p_org) then raise exception 'forbidden' using errcode = '42501'; end if;
+  if not public.is_admin(p_org) then raise exception 'forbidden' using errcode = '42501'; end if;
   select type into v_type from public.organizations where id = p_org;
   return coalesce((select json_agg(x order by x.approved_unpaid_minor desc) from (
     select case when v_type = 'store' then l.party_org_id else l.store_org_id end as other_org_id,
@@ -1174,6 +1234,22 @@ begin
   insert into public.funnel_events(event, org_id) values (p_event, p_org);
 end $$;
 
+/* ================= Dashboard: staff (role member) never receive money figures ================= */
+alter function public.org_dashboard(uuid) rename to org_dashboard_full;
+create function public.org_dashboard(p_org uuid) returns json
+language plpgsql stable security definer set search_path = '' as $$
+declare d jsonb;
+begin
+  d := public.org_dashboard_full(p_org)::jsonb;   -- checks membership
+  if public.is_admin(p_org) then return d::json; end if;
+  d := d - array['pending_commissions_minor', 'approved_commissions_minor', 'month_platform_fee_minor',
+                 'month_earnings_minor', 'pending_minor', 'approved_minor', 'fee_bps'];
+  if d ? 'recent_sales' then
+    d := jsonb_set(d, '{recent_sales}', coalesce((select jsonb_agg(x - 'commission_minor') from jsonb_array_elements(d -> 'recent_sales') x), '[]'));
+  end if;
+  return d::json;
+end $$;
+
 /* ================= Status for "next action" ================= */
 create function public.org_status(p_org uuid) returns json
 language plpgsql stable security definer set search_path = '' as $$
@@ -1197,11 +1273,11 @@ begin
     'referrals', (select count(*) from public.referrals where referrer_org_id = p_org),
     'unread', (select count(*) from public.notifications where org_id = p_org and read_at is null),
     'open_invoices', case when public.is_admin(p_org) then (select count(*) from public.invoices where store_org_id = p_org and status = 'issued') else 0 end,
-    'payouts_to_confirm', (select count(*) from public.creator_payouts where creator_org_id = p_org and creator_status = 'awaiting'),
-    'approved_unpaid_minor', (select coalesce(sum(l.amount_minor), 0) from public.commission_ledger l
+    'payouts_to_confirm', case when public.is_admin(p_org) then (select count(*) from public.creator_payouts where creator_org_id = p_org and creator_status = 'awaiting') else 0 end,
+    'approved_unpaid_minor', case when not public.is_admin(p_org) then 0 else (select coalesce(sum(l.amount_minor), 0) from public.commission_ledger l
                                where l.party_role = 'creator' and l.state = 'approved'
                                  and (l.store_org_id = p_org or l.party_org_id = p_org)
-                                 and not exists (select 1 from public.creator_payout_items i where i.ledger_id = l.id)));
+                                 and not exists (select 1 from public.creator_payout_items i where i.ledger_id = l.id)) end);
 end $$;
 
 /* ================= Platform admin views ================= */
@@ -1250,8 +1326,13 @@ create function public.admin_set_setting(p_key text, p_value jsonb) returns void
 language plpgsql security definer set search_path = '' as $$
 begin
   if not public.is_platform_admin() then raise exception 'forbidden' using errcode = '42501'; end if;
-  if p_key not in ('founders_open', 'founding_partners_open', 'reward_transfer_min_minor', 'max_proposals_per_day') then
+  if p_key not in ('founding_partners_open', 'reward_transfer_min_minor', 'max_proposals_per_day') then
     raise exception 'setting_locked' using errcode = '42501';   -- pricing & reward terms change only by migration (explicit decision)
+  end if;
+  if (p_key = 'founding_partners_open' and jsonb_typeof(p_value) <> 'boolean')
+     or (p_key <> 'founding_partners_open' and (jsonb_typeof(p_value) <> 'number' or (p_value #>> '{}')::numeric < 0
+         or (p_value #>> '{}')::numeric <> trunc((p_value #>> '{}')::numeric))) then
+    raise exception 'invalid_setting' using errcode = '22023';
   end if;
   update public.app_settings set value = p_value where key = p_key;
   insert into public.audit_events(actor_user_id, action, target, details)
@@ -1321,19 +1402,19 @@ create policy invoice_read on public.invoices for select to authenticated using 
 create policy invoice_item_read on public.invoice_items for select to authenticated using (
   exists (select 1 from public.invoices i where i.id = invoice_id and public.is_admin(i.store_org_id))
 );
-create policy referral_reward_read on public.referral_rewards for select to authenticated using (public.is_admin(referrer_org_id));
+-- referral_rewards: no client access (row-level detail would reveal per-order sales of the referred party).
 create policy reward_payout_read on public.reward_payouts for select to authenticated using (public.is_admin(org_id));
 create policy creator_payout_read on public.creator_payouts for select to authenticated using (
-  public.is_admin(store_org_id) or public.is_member(creator_org_id)
+  public.is_admin(store_org_id) or public.is_admin(creator_org_id)
 );
 create policy creator_payout_item_read on public.creator_payout_items for select to authenticated using (
-  exists (select 1 from public.creator_payouts p where p.id = payout_id and (public.is_admin(p.store_org_id) or public.is_member(p.creator_org_id)))
+  exists (select 1 from public.creator_payouts p where p.id = payout_id and (public.is_admin(p.store_org_id) or public.is_admin(p.creator_org_id)))
 );
 
 -- Ledger: members (non-admin staff) of a store no longer see money lines; admins and the earning party do.
 drop policy ledger_read on public.commission_ledger;
 create policy ledger_read on public.commission_ledger for select to authenticated using (
-  public.is_admin(store_org_id) or (party_org_id is not null and public.is_member(party_org_id))
+  public.is_admin(store_org_id) or (party_org_id is not null and public.is_admin(party_org_id))
 );
 
 revoke all on public.platform_admins, public.team_invites, public.products, public.opportunities,
@@ -1342,7 +1423,7 @@ revoke all on public.platform_admins, public.team_invites, public.products, publ
   from anon, authenticated;
 grant select on public.platform_admins, public.team_invites, public.products, public.opportunities,
   public.opportunity_applications, public.notifications, public.invoices, public.invoice_items,
-  public.referral_rewards, public.reward_payouts, public.creator_payouts, public.creator_payout_items
+  public.reward_payouts, public.creator_payouts, public.creator_payout_items
   to authenticated;
 
 /* ================= Execute grants ================= */

@@ -43,7 +43,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
       {sp.accepted && <Alert kind="ok" text={t.dash.accepted} />}
       {next && <NextAction eyebrow={t.next.title} title={next.t} text={next.d} cta={next.cta} href={next.href} />}
 
-      {status.sales > 0 && (
+      {status.sales > 0 && (org.type === "store" || status.is_admin) && (
         <section className="section stats">
           {org.type === "store" ? (
             <>
