@@ -40,7 +40,7 @@ $GLOBALS['catalog'][5] = new FakeProduct(5, 'simple', '89', true, 2, 'publish', 
 $GLOBALS['catalog'][900] = new FakeProduct(900, 'variation', '50', true, 1, 'publish', 'visible', 1, 6);
 function wc_get_product($id) { return $GLOBALS['catalog'][$id] ?? null; }
 function wc_get_products($a) { $ids = array_keys(array_filter($GLOBALS['catalog'], fn($p) => $p->type !== 'variation')); sort($ids); return array_slice($ids, ($a['page'] - 1) * $a['limit'], $a['limit']); }
-require '__DIR__ . '/linkup-connector/linkup-connector.php'';
+require __DIR__ . '/linkup-connector/linkup-connector.php';
 
 $fail = 0; $ok = function ($c, $m) use (&$fail) { echo ($c ? "PASS " : "FAIL ") . $m . "\n"; if (!$c) $fail++; };
 // 1. payloads
