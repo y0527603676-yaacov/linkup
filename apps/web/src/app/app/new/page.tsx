@@ -1,3 +1,4 @@
+import { withBrand } from "@/components/Brand";
 import { cookies } from "next/headers";
 import { Logo } from "@/components/Site";
 import { Alert } from "@/components/AppShell";
@@ -29,7 +30,7 @@ export default async function NewActivity({ searchParams }: { searchParams: Prom
       <div className="card stack">
         <Logo href="/app" />
         <h1>{orgCount ? o.titleAdd : o.title}</h1>
-        <p className="muted">{o.lead}</p>
+        <p className="muted">{withBrand(o.lead)}</p>
         {refName && <p className="badge badge-brand">{o.invitedBy(refName)}</p>}
         <Alert text={errorText(sp.error, t)} />
         <JoinForm initial={type} next={sp.next ?? ""} locale={locale} action={createOrg}

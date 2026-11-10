@@ -1,3 +1,4 @@
+import { withBrand } from "@/components/Brand";
 import Link from "next/link";
 import { Logo } from "@/components/Site";
 import { Alert } from "@/components/AppShell";
@@ -35,7 +36,7 @@ export default async function Login({ searchParams }: { searchParams: Promise<Re
           </>
         ) : (
           <>
-            <h1>{l.title}</h1>
+            <h1>{withBrand(l.title)}</h1>
             <p className="muted">{l.lead}</p>
             <Alert text={errorText(sp.error, t)} />
             <form action={sendLink} className="stack">

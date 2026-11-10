@@ -5,7 +5,7 @@ type Copy = { codeHint: string; code: string; verify: string };
 
 /**
  * The sign-in link stays the default. The code field appears only where the link cannot finish the sign-in:
- * inside an installed home-screen app (an iPhone app does not share Safari's cookies), or after a link was
+ * inside an app installed on an iPhone/iPad home screen (it does not share Safari's cookies), or after a link was
  * opened in a different browser. The form posts to the existing server action; nothing is stored in the page.
  */
 export function CodeEntry({ email, next, copy, forced, action }: {
@@ -13,8 +13,8 @@ export function CodeEntry({ email, next, copy, forced, action }: {
 }) {
   const [show, setShow] = useState(forced);
   useEffect(() => {
-    const standalone = window.matchMedia("(display-mode: standalone)").matches || (navigator as { standalone?: boolean }).standalone === true;
-    if (standalone) setShow(true);
+    // Only an installed iPhone/iPad app needs it (Android home-screen apps share Chrome's sign-in).
+    if ((navigator as { standalone?: boolean }).standalone === true) setShow(true);
   }, []);
   if (!show) return null;
   return (

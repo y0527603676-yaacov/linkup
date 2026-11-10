@@ -1,3 +1,4 @@
+import { withBrand } from "@/components/Brand";
 import { redirect } from "next/navigation";
 import { Logo } from "@/components/Site";
 import { Alert } from "@/components/AppShell";
@@ -26,7 +27,7 @@ export default async function AcceptLegal({ searchParams }: { searchParams: Prom
       <form action={acceptPendingLegal} className="card stack">
         <Logo href="/app" />
         <h1>{l.acceptTitle}</h1>
-        <p className="muted">{l.acceptLead}</p>
+        <p className="muted">{withBrand(l.acceptLead)}</p>
         <Alert text={errorText(sp.error, t)} />
         <input type="hidden" name="next" value={next} />
         <input type="hidden" name="ctx" value={ctxs.join(",")} />

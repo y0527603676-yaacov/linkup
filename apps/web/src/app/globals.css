@@ -138,11 +138,17 @@ input[type="range"] { padding: 0; border: 0; min-height: 32px; accent-color: var
 /* ---------- Public site ---------- */
 .site-header { position: sticky; top: 0; z-index: 20; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
 .site-header .in { max-width: 1120px; margin: 0 auto; display: flex; align-items: center; gap: 16px; padding: 10px 16px; }
-.logo { --logo-h: 34px; direction: ltr; text-decoration: none; display: inline-flex; align-items: center; flex: none; line-height: 0; }
+.logo { --logo-h: 22px; direction: ltr; text-decoration: none; display: inline-flex; align-items: center; flex: none; line-height: 0; }
 .logo img { display: block; width: auto; }
 .logo-sym { height: var(--logo-h); }
 .logo-word { height: calc(var(--logo-h) * 0.587); margin-inline-start: calc(var(--logo-h) * 0.082); }
-.site-footer .logo { --logo-h: 22px; }
+.site-footer .logo { --logo-h: 18px; }
+/* Restrained sizes per context (the logo never competes with the page title). */
+.site-header .logo { --logo-h: 22px; }
+.auth-wrap .logo { --logo-h: 21px; }
+.side .logo { --logo-h: 22px; }
+.app-top .logo { --logo-h: 24px; }
+@media (min-width: 900px) { .site-header .logo { --logo-h: 26px; } .side .logo { --logo-h: 24px; } }
 @media (prefers-color-scheme: dark) { .logo-word { filter: brightness(0) invert(1); } }
 .site-nav { display: flex; gap: 18px; margin-inline-start: auto; align-items: center; }
 .site-nav a { color: var(--ink); text-decoration: none; font-weight: 500; }
@@ -263,5 +269,5 @@ button[data-pending], .btn[data-pending] { opacity: .7; cursor: progress; }
 /* Home-screen suggestion (InstallPrompt) */
 .install-tip { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 14px; margin-bottom: 16px; border-radius: var(--radius-sm, 12px); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); }
 .install-tip img { border-radius: 9px; flex: none; }
-.statement-brand { margin: 8px 0 4px; } .statement-brand .logo { --logo-h: 30px; }
+.statement-brand { margin: 8px 0 4px; } .statement-brand .logo { --logo-h: 22px; }
 @media print { .statement-brand .logo-word { filter: none !important; } }
