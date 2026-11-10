@@ -17,3 +17,15 @@
 | 10 | ניקוי: ביטול כל הזמנות הבדיקה בחנות | בעל החנות | כל העמלות מתאפסות |
 
 הערות: אין חיוב, אין סליקה ואין שליחת חשבון. שלבים 3–7 יוצרים הזמנות בחנות האמיתית ולכן דורשים אישור נפרד שלך.
+
+## Results — 2026-11-10 (executed with owner approval)
+| Check | Result |
+|---|---|
+| Plugin 0.2.1 → 0.3.1 upgrade | OK; connection kept; reported v0.3.1 at 11:08 |
+| Product sync | 89 products (80 active: 74 in stock, 6 out of stock; 9 drafts/hidden excluded); prices ₪200–₪1,620 |
+| Stock sync on order | 4 → 3 within seconds (non-blocking update) → back to 4 after cancel |
+| Test order #2483 (guest, no payment, no shipping, coupon LINKEBC6, ₪180) | attributed by coupon; base ₪152.54; creator ₪15.25; LINKUP ₪3.05 |
+| Manual partial refund ₪90 (no money moved) | creator ₪7.63; LINKUP ₪1.53 |
+| Cancel | creator ₪0; LINKUP ₪0; stock restored to 4 |
+| Customer e-mails | none (guest order without e-mail) |
+| Existing orders | untouched |
