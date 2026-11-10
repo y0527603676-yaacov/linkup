@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSupabase } from "@/lib/supabase/server";
 
-/** Partner link: /r/CODE → store site with ?lku=CODE (the plugin stores a first-party cookie). */
+/** Partner link: /r/CODE → store site with ?lku=CODE (the plugin stores a 30-day first-party cookie) and standard
+ *  UTM tags (WooCommerce's built-in Order Attribution records them for same-visit purchases, no plugin needed). */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ code: string }> }) {
   const { code } = await params;
   const home = new URL("/", req.url);
@@ -12,5 +13,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ code
   if (!r?.url) return NextResponse.redirect(home);
   const dest = new URL(r.url);
   dest.searchParams.set("lku", r.code);
+  dest.searchParams.set("utm_source", "linkup");
+  dest.searchParams.set("utm_medium", "partner");
+  dest.searchParams.set("utm_campaign", r.code);
   return NextResponse.redirect(dest, { status: 302 });
 }

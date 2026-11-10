@@ -37,7 +37,11 @@ export default async function Catalog({ searchParams }: { searchParams: Promise<
         <Link className={`tab${kind === "campaign" ? " on" : ""}`} href={`${base}&kind=campaign`}>{c.campaigns}</Link>
         <Link className={`tab${kind === "standing" ? " on" : ""}`} href={`${base}&kind=standing`}>{c.standing}</Link>
       </nav>
-      {items.length === 0 ? <p className="empty">{c.empty}</p> : (
+      {items.length === 0 ? (
+        <div className="empty stack" style={{ alignItems: "center", gap: 10 }}>
+          <span>{sp.q ? c.empty : c.emptyInvite}</span>
+          <Link className="btn btn-primary btn-sm" href={`/app/invite?org=${org.id}`}>{t.next.inviteStore.cta}</Link>
+        </div>) : (
         <div className="opps">
           {items.map((o) => {
             const st = state(o);

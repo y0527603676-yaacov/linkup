@@ -2,7 +2,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { getSupabase } from "@/lib/supabase/server";
+import { getOrigin, getSupabase } from "@/lib/supabase/server";
 import { errorCode, safeNext } from "@/lib/format";
 import { getLocale } from "@/i18n";
 
@@ -62,6 +62,34 @@ export async function connectStore(_prev: ConnectState, form: FormData): Promise
   if (error) return { error: errorCode(error) };
   const r = data as { connection_key: string; site_url: string };
   return { key: r.connection_key, site: r.site_url };
+}
+
+/* ---------- Store connection without a plugin (WooCommerce approves inside the store) ---------- */
+export async function startWooApi(form: FormData) {
+  const org = str(form, "org");
+  const sb = await getSupabase();
+  const legal = form.getAll("legal").map(String).filter(Boolean);
+  if (legal.length) {
+    if (str(form, "agree") !== "1") redirect(back("/app/connect", org, { error: "legal_acceptance_required" }));
+    const { error: le } = await sb.rpc("accept_legal", { p_doc_keys: legal, p_type: "store_connection", p_org: org, p_locale: await getLocale() });
+    if (le) redirect(back("/app/connect", org, { error: errorCode(le) }));
+  }
+  const { data, error } = await sb.rpc("start_woo_api_connect", { p_org: org, p_site_url: str(form, "site") });
+  if (error) redirect(back("/app/connect", org, { error: errorCode(error) }));
+  const r = data as { state: string; site_url: string; callback_url: string };
+  const u = new URL(`${r.site_url.replace(/\/+$/, "")}/wc-auth/v1/authorize`);
+  u.searchParams.set("app_name", "LINKUP");
+  u.searchParams.set("scope", "read_write");
+  u.searchParams.set("user_id", r.state);
+  u.searchParams.set("return_url", `${await getOrigin()}/app/connect/return?org=${org}&state=${r.state}`);
+  u.searchParams.set("callback_url", r.callback_url);
+  redirect(u.toString());
+}
+
+export async function syncWooApi(form: FormData) {
+  const org = str(form, "org");
+  const { error } = await (await getSupabase()).rpc("request_woo_api_sync", { p_org: org });
+  redirect(back("/app/connect", org, error ? { error: errorCode(error) } : { ok: "sync" }));
 }
 
 /* ---------- Direct invites (proposals) ---------- */

@@ -1,8 +1,10 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ChoiceButton } from "@/components/ChoiceButton";
 import { AppShell, PageHead, Alert, Stat } from "@/components/AppShell";
 import { loadApp } from "@/lib/orgs";
 import { errorText, money, shortDate } from "@/lib/format";
+import { Overview } from "./Overview";
 import { adminAction } from "../actions";
 
 export default async function Admin({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
@@ -15,6 +17,8 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
     sb.rpc("legal_admin_documents"), sb.rpc("admin_contact_messages")]);
   const [{ data: fn }, { data: fd }, { data: exq }, { data: vb }] = await Promise.all([sb.rpc("admin_fee_notices"), sb.rpc("finance_dashboard"), sb.rpc("billing_exceptions"), sb.rpc("admin_vat_basis_pending")]);
   const vatPending = (vb ?? []) as any[];
+  const tab = ["overview", "orgs", "finance", "settings"].includes(sp.tab ?? "") ? sp.tab! : "overview";
+  const { data: pov } = tab === "overview" || tab === "orgs" ? await sb.rpc("admin_pilot_overview", { p_include_test: sp.test === "1" }) : { data: null };
   const { data: ts } = await sb.rpc("admin_test_signups");
   const testSignups = (ts ?? []) as { email: string; note: string | null; registered: boolean }[];
   const F = (fd ?? {}) as Record<string, any>;
@@ -42,26 +46,13 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
       <PageHead title={a.title} />
       <Alert text={errorText(sp.error, t)} />
       {sp.ok && <Alert kind="ok" text={t.common.saved} />}
-      <section className="stats">
-        <Stat label={a.stores} value={d.stores} /><Stat label={a.creators} value={d.creators} /><Stat label={a.connected} value={d.connected_stores} />
-        <Stat label={a.sales30} value={d.attributed_sales_30d} /><Stat label={a.feesPending} value={money(d.platform_fees_pending_minor, "ILS", locale)} />
-        <Stat label={a.uninvoiced} value={money(d.platform_fees_uninvoiced_minor, "ILS", locale)} /><Stat label={a.openInv} value={money(d.invoices_open_minor, "ILS", locale)} />
-        <Stat money label={a.paidInv} value={money(d.invoices_paid_minor, "ILS", locale)} /><Stat label={a.rewards} value={money(d.rewards_earned_minor, "ILS", locale)} />
-        <Stat label={a.suspected} value={d.suspected_self_referrals} /><Stat label={a.blocked} value={d.blocked_referrals} />
-      </section>
+      <nav className="tabs" aria-label={a.title} style={{ marginBottom: 16 }}>
+        {(["overview", "orgs", "finance", "settings"] as const).map((k) => (
+          <Link key={k} className={`tab${tab === k ? " on" : ""}`} href={`/app/admin?org=${org.id}&tab=${k}`} aria-current={tab === k ? "page" : undefined}>{a.tabs[k]}</Link>))}
+      </nav>
+      {tab === "overview" && pov && <Overview o={pov as any} a={a} locale={locale} orgParam={org.id} />}
 
-      <section className="section"><H>{a.funnel}</H>
-        <div className="table-wrap card card-flat"><table className="t"><thead><tr><th /><th>30d</th><th>Σ</th></tr></thead><tbody>
-          {funnelOrder.map((k) => <tr key={k}><td>{a.events[k]}</td><td>{d.funnel?.[k]?.last_30d ?? 0}</td><td>{d.funnel?.[k]?.total ?? 0}</td></tr>)}
-        </tbody></table></div>
-      </section>
-
-      {(d.silent_connections ?? []).length > 0 && (
-        <section className="section"><H>{a.silent}</H>
-          <div className="list">{d.silent_connections.map((c: any, i: number) => <div className="item" key={i}><span className="title">{c.org}</span><span className="meta ltr">{c.site_url} · {shortDate(c.last_sync_at, locale)}</span></div>)}</div>
-        </section>
-      )}
-
+      {tab === "finance" && <>
       <section className="section"><H>{bl.finance}</H>
         {!F.auto_enabled && <p className="small muted">{bl.off}</p>}
         <div className="stats">
@@ -219,6 +210,17 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
         </section>
       )}
 
+      </>}
+
+      {tab === "orgs" && <>
+      <section className="section"><H>{a.orgs}</H>
+        <p className="small muted">{sp.test === "1" ? a.ov.withTest : a.ov.realOnly((pov as any)?.test_orgs ?? 0)}{" "}
+          <Link href={`/app/admin?org=${org.id}&tab=orgs${sp.test === "1" ? "" : "&test=1"}`}>{sp.test === "1" ? a.ov.showReal : a.ov.showTest}</Link></p>
+        <div className="list">{(((pov as any)?.recent ?? []) as any[]).map((o) => (
+          <div className="item" key={o.id}><div className="grow"><div className="title">{o.name} <span className="badge">{t.common.orgType[o.type]}</span>{o.is_test && <> <span className="badge badge-warn">{t.common.testAccount}</span></>}{o.connected && <> <span className="badge badge-money">✓</span></>}</div>
+            <div className="meta">{shortDate(o.created_at, locale)} · {t.nav.partners}: {o.partners} · {t.dash.recentSales}: {o.sales}</div></div></div>))}</div>
+      </section>
+
       <section className="section"><H>{a.testTitle}</H>
         <p className="small muted">{a.testLead}</p>
         <form action={adminAction} className="row" style={{ flexWrap: "wrap", gap: 8 }}>{hidden}<input type="hidden" name="op" value="test_add" />
@@ -234,29 +236,9 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
           </div>))}</div>}
       </section>
 
-      <section className="section"><H>{t.legal.drafts}</H>
-        <p className="small muted">{t.legal.draftNote}</p>
-        <p className="small alert alert-warn">{a.nextVersionFix}</p>
-        <div className="list">{legalDocs.map((x) => (
-          <a className="item" key={x.id} href={`/legal/${x.doc_key}?lang=${x.locale}${x.status === "draft" ? `&draft=${x.version}` : ""}`}>
-            <div className="grow"><div className="title">{x.title}</div>
-              <div className="meta ltr">{x.doc_key} · {x.locale} · v{x.version}.0 · {x.audience} · {x.chars}</div></div>
-            <span className={`badge ${x.status === "published" ? "badge-money" : "badge-warn"}`}>{x.status === "published" ? t.common.saved : t.legal.draftBadge}</span></a>))}</div>
-      </section>
+      </>}
 
-      {contacts.length > 0 && (
-        <section className="section"><H>{a.contacts}</H>
-          <div className="list">{contacts.map((c) => (
-            <div className="item" key={c.id}>
-              <div className="grow"><div className="title">{c.name} · <span className="ltr">{c.email}</span> · {t.contact.topics[c.topic]}</div>
-                <div className="meta" style={{ whiteSpace: "pre-wrap" }}>{c.message}</div><div className="meta">{shortDate(c.created_at, locale)}</div></div>
-              {c.handled_at ? <span className="badge">{a.handled}</span> : (
-                <form action={adminAction}>{hidden}<input type="hidden" name="op" value="contact" /><input type="hidden" name="id" value={c.id} />
-                  <button className="btn btn-ghost btn-sm">{a.handled}</button></form>)}
-            </div>))}</div>
-        </section>
-      )}
-
+      {tab === "finance" && <>
       <section className="section"><H>{a.taxProfiles}</H>
         <div className="list">{(A.tax_profiles ?? []).map((p: any) => (
           <form action={adminAction} className="item" key={p.org_id}>{hidden}<input type="hidden" name="op" value="verify" /><input type="hidden" name="target" value={p.org_id} />
@@ -294,19 +276,40 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
         </section>
       )}
 
-      <section className="section"><H>{a.orgs}</H>
-        <div className="list">{(d.recent_orgs ?? []).map((o: any) => (
-          <div className="item" key={o.id}><div className="grow"><div className="title">{o.name} <span className="badge">{t.common.orgType[o.type]}</span>{o.connected && <> <span className="badge badge-money">✓</span></>}</div>
-            <div className="meta">{shortDate(o.created_at, locale)} · {t.nav.partners}: {o.partners} · {t.dash.recentSales}: {o.sales}{o.referred_by ? ` · ← ${o.referred_by}` : ""}</div></div></div>))}</div>
-      </section>
+      </>}
 
+      {tab === "settings" && <>
       <section className="section"><H>{a.settings}</H>
-        <div className="list">{["founding_partners_open", "founders_open"].map((k) => (
+        <div className="list">{["founding_partners_open", "woo_api_connect_open"].map((k) => (
           <form action={adminAction} className="item" key={k}>{hidden}<input type="hidden" name="op" value="setting" /><input type="hidden" name="key" value={k} />
-            <span className="title mono">{k}</span>
+            <span className="title">{a.settingLabels[k] ?? k}</span>
             <select name="value" defaultValue={String(d.settings?.[k])} style={{ width: "auto" }}><option value="true">true</option><option value="false">false</option></select>
             <button className="btn btn-ghost btn-sm">{t.common.save}</button></form>))}</div>
       </section>
+      <section className="section"><H>{t.legal.drafts}</H>
+        <p className="small muted">{t.legal.draftNote}</p>
+        <p className="small alert alert-warn">{a.nextVersionFix}</p>
+        <div className="list">{legalDocs.map((x) => (
+          <a className="item" key={x.id} href={`/legal/${x.doc_key}?lang=${x.locale}${x.status === "draft" ? `&draft=${x.version}` : ""}`}>
+            <div className="grow"><div className="title">{x.title}</div>
+              <div className="meta ltr">{x.doc_key} · {x.locale} · v{x.version}.0 · {x.audience} · {x.chars}</div></div>
+            <span className={`badge ${x.status === "published" ? "badge-money" : "badge-warn"}`}>{x.status === "published" ? t.common.saved : t.legal.draftBadge}</span></a>))}</div>
+      </section>
+
+      {contacts.length > 0 && (
+        <section className="section"><H>{a.contacts}</H>
+          <div className="list">{contacts.map((c) => (
+            <div className="item" key={c.id}>
+              <div className="grow"><div className="title">{c.name} · <span className="ltr">{c.email}</span> · {t.contact.topics[c.topic]}</div>
+                <div className="meta" style={{ whiteSpace: "pre-wrap" }}>{c.message}</div><div className="meta">{shortDate(c.created_at, locale)}</div></div>
+              {c.handled_at ? <span className="badge">{a.handled}</span> : (
+                <form action={adminAction}>{hidden}<input type="hidden" name="op" value="contact" /><input type="hidden" name="id" value={c.id} />
+                  <button className="btn btn-ghost btn-sm">{a.handled}</button></form>)}
+            </div>))}</div>
+        </section>
+      )}
+
+      </>}
     </AppShell>
   );
 }

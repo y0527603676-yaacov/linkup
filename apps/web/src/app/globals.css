@@ -271,3 +271,16 @@ button[data-pending], .btn[data-pending] { opacity: .7; cursor: progress; }
 .install-tip img { border-radius: 9px; flex: none; }
 .statement-brand { margin: 8px 0 4px; } .statement-brand .logo { --logo-h: 22px; }
 @media print { .statement-brand .logo-word { filter: none !important; } }
+
+/* Store connection: platform choice */
+.platforms { display: flex; flex-wrap: wrap; gap: 8px; }
+.platform { padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); font-weight: 600; font-size: .9rem; color: var(--muted); }
+.platform.on { border-color: var(--brand); color: var(--brand); box-shadow: 0 0 0 1px var(--brand) inset; }
+.platform small { font-weight: 400; margin-inline-start: 4px; }
+
+/* Admin funnel */
+.funnel { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.funnel-row { display: flex; gap: 10px; align-items: baseline; }
+.funnel-row span:first-child { flex: 1; }
+.funnel-bar { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
+.funnel-bar i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--brand), var(--accent)); }
