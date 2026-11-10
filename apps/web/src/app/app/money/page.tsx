@@ -17,7 +17,7 @@ export default async function Money({ searchParams }: { searchParams: Promise<Re
   const isStore = org.type === "store";
   const [{ data: bal }, { data: payouts }, { data: invoices }, { data: fee }] = await Promise.all([
     sb.rpc("payout_balances", { p_org: org.id }),
-    sb.from("creator_payouts").select("id, store_org_id, creator_org_id, amount_minor, vat_minor, currency, method, reference, paid_on, paid_at, creator_status, withdrawn_at, dispute_reason, store_response, withdraw_note")
+    sb.from("creator_payouts").select("id, store_org_id, creator_org_id, amount_minor, vat_minor, withholding_minor, net_minor, currency, method, reference, paid_on, paid_at, creator_status, withdrawn_at, dispute_reason, store_response, withdraw_note")
       .eq(isStore ? "store_org_id" : "creator_org_id", org.id).order("paid_at", { ascending: false }).limit(50),
     isStore && status.is_admin ? sb.from("invoices").select("*").eq("store_org_id", org.id).neq("status", "void").order("period_start", { ascending: false }).limit(24) : Promise.resolve({ data: [] as any[] }),
     isStore && status.is_admin ? sb.rpc("store_fee_terms", { p_store: org.id }) : Promise.resolve({ data: null }),

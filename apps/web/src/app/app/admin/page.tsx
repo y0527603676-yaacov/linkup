@@ -13,7 +13,8 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
   const a = t.admin;
   const [{ data }, { data: ai }, { data: ld }, { data: cm }] = await Promise.all([sb.rpc("admin_overview"), sb.rpc("admin_invoices"),
     sb.rpc("legal_admin_documents"), sb.rpc("admin_contact_messages")]);
-  const [{ data: fn }, { data: fd }, { data: exq }] = await Promise.all([sb.rpc("admin_fee_notices"), sb.rpc("finance_dashboard"), sb.rpc("billing_exceptions")]);
+  const [{ data: fn }, { data: fd }, { data: exq }, { data: vb }] = await Promise.all([sb.rpc("admin_fee_notices"), sb.rpc("finance_dashboard"), sb.rpc("billing_exceptions"), sb.rpc("admin_vat_basis_pending")]);
+  const vatPending = (vb ?? []) as any[];
   const F = (fd ?? {}) as Record<string, any>;
   const exceptions = (exq ?? []) as any[];
   const bl = t.billing;
@@ -192,6 +193,18 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
                   <input type="date" name="end" required style={{ width: "auto" }} /><input name="note" required placeholder={a.note} style={{ flex: 1, minWidth: 140 }} />
                   <button className="btn btn-ghost btn-sm">{a.planWindDown}</button></form>))}
             </div>))}</div>
+        </section>
+      )}
+
+      {vatPending.length > 0 && (
+        <section className="section"><H>{a.vatBasisTitle}</H>
+          <p className="small muted">{a.vatBasisLead}</p>
+          <div className="stack">{vatPending.map((g) => (
+            <form key={g.id} action={adminAction} className="card card-flat small row" style={{ flexWrap: "wrap", gap: 8 }}>{hidden}
+              <input type="hidden" name="op" value="vatbasis" /><input type="hidden" name="id" value={g.id} />
+              <b>{g.store} ↔ {g.creator} · {shortDate(g.created_at, locale)}</b>
+              <input name="note" required placeholder={a.vatBasisNote} style={{ flex: 1, minWidth: 160 }} />
+              <button className="btn btn-ghost btn-sm">{a.vatBasisDecide}</button></form>))}</div>
         </section>
       )}
 

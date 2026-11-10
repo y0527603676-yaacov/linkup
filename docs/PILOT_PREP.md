@@ -89,3 +89,22 @@ Each store keeps its own payment provider. There is no split at sale time, and L
 - **Master switch:** while `auto_collection_enabled` is false, nothing is scheduled or charged. `billing_provider` is `simulated`.
 - **Worker:** `POST /api/billing/run`, which requires `BILLING_CRON_SECRET` and `SUPABASE_SERVICE_ROLE_KEY` in server env. Webhooks arrive at `/api/billing/webhook/<provider>`. The simulated card page appears only when `BILLING_SIMULATION=true`.
 - **Owner:** finance dashboard (`finance_dashboard()`) and a single exceptions queue (`billing_exceptions()`) with suggested actions (retry charge, refund).
+
+## Creator commission tax breakdown (migration `20261111100700_creator_tax_breakdown.sql`)
+
+- A creator commission is agreed **before VAT**. VAT is added only by the creator's **verified** classification:
+  company or authorised dealer at the VAT rate; exempt dealer 0.
+  - Unverified, private individual, or foreign resident: nothing is computed. A VAT amount is refused (`creator_tax_undetermined`); the base commission can still be recorded.
+- Shown and recorded separately: base commission · VAT · withholding · net to transfer · amount actually transferred.
+  - The server sets VAT.
+  - Withholding is entered by the store as actually withheld, with an optional reference. It is never computed.
+  - All of these are immutable once recorded.
+- **Existing agreements** are marked `unspecified`: no VAT is computed and the agreed commission is unchanged. The owner records a decision per collaboration (with a reason) in the admin screen.
+  - On the production copy this is 1 collaboration.
+- New parties see the definition on the offer page, in the catalog and on proposal pages.
+- Legal text: see `docs/legal/NEXT_VERSION_CORRECTIONS.md`.
+- Tests: `creator-tax.test.ts` (9); the settlement e2e has new checks.
+
+## Morning
+
+See `docs/MORNING_CONNECTION.md`. The adapter is implemented on the documented API; it is not connected.

@@ -59,6 +59,7 @@ export default async function Offer({ searchParams }: { searchParams: Promise<Re
           </details>
         )}
         <p className="small muted">{o.termsNote}</p>
+        <p className="small muted">{o.vatNote}</p>
         {!ro && (
           <div className="row">
             <ChoiceButton className="btn btn-primary" name="status" value="live">{o.publish}</ChoiceButton>

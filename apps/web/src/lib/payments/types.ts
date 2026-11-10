@@ -2,8 +2,11 @@
  * Provider-neutral payment layer for collecting the LINKUP fee. Only this folder talks to providers;
  * the database holds the rules (what to charge, when, retries, what is paid). Card numbers never reach LINKUP.
  */
-export type ChargeRequest = { chargeId: string; invoiceId: string; amountMinor: number; currency: string; tokenRef: string; idempotencyKey: string };
-export type ChargeResult = { ok: true; providerRef: string } | { ok: false; providerRef?: string; code: string; message: string };
+export type ChargeRequest = { chargeId: string; invoiceId: string; amountMinor: number; currency: string; tokenRef: string; idempotencyKey: string;
+  /** The payment request being paid: the fee and its VAT are documented in full; an offset needs separate documents. */
+  invoice?: { feeMinor: number; vatMinor: number; offsetMinor: number } };
+/** `document`: some providers (Morning) issue the tax invoice-receipt in the same call as the charge. */
+export type ChargeResult = { ok: true; providerRef: string; document?: IssuedDocument } | { ok: false; providerRef?: string; code: string; message: string };
 export type RefundRequest = { refundId: string; providerRef: string; amountMinor: number; currency: string };
 export type RefundResult = { ok: true; providerRef: string } | { ok: false; message: string };
 
@@ -14,11 +17,15 @@ export interface PaymentProvider {
   createSetupSession(input: { storeOrgId: string; returnUrl: string }): Promise<{ url: string }>;
   charge(req: ChargeRequest): Promise<ChargeResult>;
   refund(req: RefundRequest): Promise<RefundResult>;
+  /** Before charging again after an earlier attempt, look for a charge of this payment request that already went
+   *  through (e.g. the response was lost). Prevents a double charge. Optional. */
+  findCharge?(invoiceId: string): Promise<{ providerRef: string; document?: IssuedDocument } | null>;
   /** Verifies a webhook's signature and normalises it. Returns null when the signature is not valid. */
   parseWebhook(headers: Headers, rawBody: string): Promise<{ eventId: string; kind: string; payload: Record<string, unknown> } | null>;
 }
 
-export type IssuedDocument = { docType: "tax_invoice_receipt" | "credit_note"; number: string; issuedOn: string; amountMinor: number; vatMinor: number };
+export type IssuedDocument = { docType: "tax_invoice_receipt" | "credit_note"; number: string; issuedOn: string; amountMinor: number; vatMinor: number;
+  providerDocId?: string; url?: string };
 
 /** Issues the official tax documents (tax invoice-receipt on payment, credit note on refund) with allocation numbers. */
 export interface DocumentProvider {

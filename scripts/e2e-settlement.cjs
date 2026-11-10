@@ -16,7 +16,7 @@ const OWNER = 'a0000000-0000-0000-0000-000000000001', CREATOR = 'a0000000-0000-0
   const as = async (uid, email, lang = 'he') => {
     const ctx = await b.newContext({ ...devices['iPhone 13'], locale: lang });
     await ctx.addCookies([{ name: 'sb-localhost-auth-token', value: token(uid, email), domain: 'localhost', path: '/' }, { name: 'lk_lang', value: lang, domain: 'localhost', path: '/' }]);
-    const p = await ctx.newPage(); p.on('pageerror', (e) => { console.log('JS ERROR', e.message); fails++; }); return p;
+    const p = await ctx.newPage(); p.on('pageerror', (e) => { console.log('JS ERROR', p.url(), e.message.slice(0, 80)); fails++; }); return p;
   };
   const go = (p, path) => p.goto(B + path, { waitUntil: 'networkidle' });
   const submit = async (p, sel) => { await Promise.all([p.waitForNavigation({ waitUntil: 'networkidle' }), p.click(sel)]); };
@@ -40,6 +40,7 @@ const OWNER = 'a0000000-0000-0000-0000-000000000001', CREATOR = 'a0000000-0000-0
   ok(sql(`select method||'|'||bank_code from creator_payout_details where org_id='${creator}'`) === 'bank_transfer|12', 'creator payment details saved');
   await c.screenshot({ path: `${SHOTS}/st-creator-money-he.png`, fullPage: true });
   ok(await noOverflow(c), 'creator money page: no overflow');
+  ok(cm.includes('עמלת בסיס מוסכמת') && cm.includes('ניכוי מס במקור') && cm.includes('לא נקבע'), 'breakdown: base, withholding; VAT not determined for an unverified creator');
 
   // 2. Store: pay page — details shown, nothing recorded by viewing or copying
   const s = await as(OWNER, 'owner@flow.test');
@@ -53,10 +54,12 @@ const OWNER = 'a0000000-0000-0000-0000-000000000001', CREATOR = 'a0000000-0000-0
   await s.screenshot({ path: `${SHOTS}/st-pay-he.png`, fullPage: true });
   // partial payment + proof
   fs.writeFileSync('/tmp/claude-proof.pdf', '%PDF-1.4 local proof');
-  await s.fill('input[name=amount]', '10'); await s.fill('input[name=reference]', 'TR-77');
+  ok(pc.includes('לא יירשם מע״מ') && pc.includes('LINKUP לא מחשבת ניכוי במקור'), 'pay page: no VAT without a verified classification; withholding is entered, not computed');
+  await s.fill('input[name=amount]', '10'); await s.fill('input[name=reference]', 'TR-77'); await s.fill('input[name=withholding]', '0.5');
   await s.setInputFiles('input[name=proof]', '/tmp/claude-proof.pdf');
   await submit(s, 'button:has-text("דיווח על התשלום")');
   ok(sql('select amount_minor||\'|\'||creator_status from creator_payouts') === '1000|awaiting', 'partial payment reported (₪10), awaiting confirmation');
+  ok(sql("select vat_minor||'|'||withholding_minor||'|'||net_minor||'|'||tax_basis from creator_payouts") === '0|50|950|undetermined', 'recorded: VAT 0 (undetermined), withholding ₪0.50, net transferred ₪9.50');
   ok(sql('select count(*) from payout_proofs') === '1', 'proof attached');
   ok((await s.content()).includes('החנות דיווחה על תשלום'), 'store sees "store reported a payment"');
 
@@ -75,6 +78,7 @@ const OWNER = 'a0000000-0000-0000-0000-000000000001', CREATOR = 'a0000000-0000-0
   await go(s, `/app/money/statement?org=${store}&with=${creator}`);
   const st = await s.content();
   ok(st.includes('אינו מסמך מס') && st.includes('TR-77'), 'statement: not a tax document, payments listed');
+  ok(st.includes('הועבר בפועל') && st.includes('9.50'), 'statement shows withholding and the amount actually transferred');
   await s.screenshot({ path: `${SHOTS}/st-statement-he.png`, fullPage: true });
   await go(c, `/app/money/statement?org=${creator}&with=${store}&kind=request`);
   ok((await c.content()).includes('דרישת תשלום – אינה חשבונית מס'), 'creator payment request (not a tax invoice)');

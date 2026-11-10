@@ -6,8 +6,9 @@ import { respondPayout, answerDispute, withdrawPayout, savePayoutDetails } from 
 
 export type PairBal = { other_org_id: string; other_name: string; currency: string; sales: number; pending_minor: number; approved_minor: number;
   outstanding_minor: number; balance_minor: number; reported_minor: number; confirmed_minor: number; due_at: string | null; overdue: boolean; due_soon: boolean;
-  awaiting_confirmation: number };
-export type Payout = { id: string; store_org_id: string; creator_org_id: string; amount_minor: number; vat_minor: number; currency: string; method: string;
+  awaiting_confirmation: number; vat_basis: string; vat_reason: string; vat_bps: number | null; outstanding_vat_minor: number | null;
+  outstanding_gross_minor: number | null; reported_vat_minor: number; withheld_minor: number; transferred_minor: number };
+export type Payout = { id: string; store_org_id: string; creator_org_id: string; amount_minor: number; vat_minor: number; withholding_minor: number; net_minor: number; currency: string; method: string;
   reference: string | null; paid_on: string | null; paid_at: string; creator_status: string; withdrawn_at: string | null; dispute_reason: string | null;
   store_response: string | null; withdraw_note: string | null };
 
@@ -49,6 +50,8 @@ export function Settlement({ t, locale, orgId, isStore, isAdmin, balances, payou
                 <div className="small muted" style={{ marginTop: 6 }}>
                   {p.sales}: {b.sales} · {p.pending}: {m(b.pending_minor, b.currency)} · {p.approved}: {m(b.approved_minor, b.currency)} · {p.reported}: {m(b.reported_minor, b.currency)} · {p.confirmed}: {m(b.confirmed_minor, b.currency)}
                 </div>
+                {Number(b.outstanding_minor) > 0 && <TaxBreakdown t={t} b={b} m={m} />}
+                {Number(b.reported_minor) > 0 && <div className="small muted" style={{ marginTop: 4 }}>{p.tx.transferredLine(m(b.reported_minor, b.currency), m(b.reported_vat_minor, b.currency), m(b.withheld_minor, b.currency), m(b.transferred_minor, b.currency))}</div>}
                 {b.due_at && Number(b.outstanding_minor) > 0 && <div className="small" style={{ marginTop: 4 }}>{p.dueBy(shortDate(b.due_at, locale))}</div>}
                 {Number(b.balance_minor) < 0 && <div className="small muted">{p.credit}: {m(-Number(b.balance_minor), b.currency)}</div>}
                 {isAdmin && (
@@ -73,7 +76,7 @@ export function Settlement({ t, locale, orgId, isStore, isAdmin, balances, payou
             {payouts.map((x) => (
               <div className="card card-flat small" key={x.id}>
                 <div className="row between" style={{ flexWrap: "wrap", gap: 8 }}>
-                  <b>{names[isStore ? x.creator_org_id : x.store_org_id] ?? "—"} · {m(x.amount_minor, x.currency)}{Number(x.vat_minor) > 0 ? ` + ${m(x.vat_minor, x.currency)} מע״מ` : ""}</b>
+                  <b>{names[isStore ? x.creator_org_id : x.store_org_id] ?? "—"} · {p.tx.paymentLine(m(x.amount_minor, x.currency), m(x.vat_minor, x.currency), m(x.withholding_minor ?? 0, x.currency), m(x.net_minor ?? x.amount_minor, x.currency))}</b>
                   <span className={`badge ${status(x) === "confirmed" ? "badge-money" : status(x) === "awaiting" ? "" : "badge-warn"}`}>{p.statuses[status(x)]}</span>
                 </div>
                 <div className="muted">{shortDate(x.paid_on ?? x.paid_at, locale)} · {t.money.methods[x.method] ?? x.method}{x.reference ? ` · ${x.reference}` : ""}</div>
@@ -131,5 +134,22 @@ export function Settlement({ t, locale, orgId, isStore, isAdmin, balances, payou
         </section>
       )}
     </>
+  );
+}
+
+/** Base commission (before VAT) · VAT only by a verified basis · withholding entered at payment · net to transfer. */
+export function TaxBreakdown({ t, b, m }: { t: Dict; b: PairBal; m: (v: number | string, cur?: string) => string }) {
+  const x = t.pay.tx;
+  const known = b.vat_bps !== null && b.vat_bps !== undefined;
+  const row = (label: string, value: string) => (
+    <div className="row between" style={{ gap: 12 }}><span>{label}</span><b className="ltr" style={{ whiteSpace: "nowrap" }}>{value}</b></div>);
+  return (
+    <div className="small stack" style={{ marginTop: 6, gap: 4 }}>
+      {row(x.base, m(b.outstanding_minor, b.currency))}
+      {row(`${x.vat}${known ? ` (${(Number(b.vat_bps) / 100).toFixed(0)}%)` : ""}`, known ? m(b.outstanding_vat_minor ?? 0, b.currency) : x.undetermined)}
+      {row(x.net, known ? m(b.outstanding_gross_minor ?? 0, b.currency) : x.undetermined)}
+      <span className="muted">{x.withholding}: {x.withholdingAtPay}</span>
+      {!known && <span className="muted">{x.reasons[b.vat_reason] ?? x.reasons.classification_unverified}</span>}
+    </div>
   );
 }

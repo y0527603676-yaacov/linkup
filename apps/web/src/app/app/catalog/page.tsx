@@ -73,6 +73,7 @@ export default async function Catalog({ searchParams }: { searchParams: Promise<
           })}
         </div>
       )}
+      <p className="small muted" style={{ marginTop: 12 }}>{t.offer.vatNote}</p>
     </AppShell>
   );
 }

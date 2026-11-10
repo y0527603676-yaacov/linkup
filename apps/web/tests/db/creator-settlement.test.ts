@@ -68,13 +68,13 @@ describe("reporting payments", () => {
     await expect(rpc(u.staff!, "report_creator_payment", { p_store: org.S, p_creator: org.C, p_amount_minor: 100, p_vat_minor: 0,
       p_method: "bank_transfer", p_paid_on: null, p_reference: null, p_idempotency_key: null })).rejects.toThrow(/forbidden/);
     await expect(report(3_000)).rejects.toThrow(/invalid_amount/);          // includes the pending 1 000 → refused
-    const r1 = await report(1_000, "k-1", 180);                            // VAT recorded separately
+    const r1 = await report(1_000, "k-1");                                 // creator not verified → no VAT (see creator-tax)
     expect(Number(r1.remaining_minor)).toBe(1_000);
     expect((await report(1_000, "k-1")).duplicate).toBe(true);             // double submit → same report
     const b = await bal();
     expect(Number(b.outstanding_minor)).toBe(1_000);
     expect(Math.round((Date.parse(b.due_at) - Date.now()) / 86_400_000)).toBe(4);   // now the 10-day-old approval
-    expect(await q(`select count(*)::int n, sum(vat_minor)::int v from creator_payouts`)).toEqual([{ n: 1, v: 180 }]);
+    expect(await q(`select count(*)::int n, sum(vat_minor)::int v from creator_payouts`)).toEqual([{ n: 1, v: 0 }]);
     await expect(q(`update creator_payouts set amount_minor = 1`)).rejects.toThrow(/append_only/);
     await expect(q(`delete from creator_payouts`)).rejects.toThrow(/append_only/);
   });

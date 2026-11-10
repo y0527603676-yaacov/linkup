@@ -4,6 +4,7 @@ import { CopyButton } from "@/components/CopyButton";
 import { loadApp } from "@/lib/orgs";
 import { errorText, money, shortDate } from "@/lib/format";
 import { reportPayment } from "../../actions";
+import { TaxBreakdown } from "../Settlement";
 
 /** "Pay the creator": what is due, how to pay (copy details / open her payment link), then report the payment.
  *  Nothing here moves money; copying details or opening a link is never recorded as a payment. */
@@ -19,6 +20,8 @@ export default async function Pay({ searchParams }: { searchParams: Promise<Reco
   const { data: det } = await sb.rpc("payee_details", { p_store: org.id, p_creator: sp.creator });
   const d = det as any;
   const amount = (Number(b.outstanding_minor) / 100).toFixed(2);
+  const known = b.vat_bps !== null && b.vat_bps !== undefined;
+  const toCopy = known ? Number(b.outstanding_gross_minor) : Number(b.outstanding_minor);
   const key = crypto.randomUUID();
   const row = (label: string, value: string | null | undefined) => value ? (
     <div className="row between" style={{ gap: 8 }}><span className="muted">{label}</span><span className="row" style={{ gap: 8 }}><b className="ltr">{value}</b><CopyButton text={value} label={p.copy} /></span></div>
@@ -29,7 +32,8 @@ export default async function Pay({ searchParams }: { searchParams: Promise<Reco
         <PageHead title={`${p.title}: ${b.other_name}`} />
         <Alert text={errorText(sp.error, t)} />
         <div className="card stack">
-          <div className="row between"><span>{p.outstanding}</span><span className="row" style={{ gap: 8 }}><b className="amount">{money(b.outstanding_minor, b.currency, locale)}</b><CopyButton text={amount} label={p.copy} /></span></div>
+          <div className="row between"><span>{known ? p.tx.netBeforeWithholding : p.tx.base}</span><span className="row" style={{ gap: 8 }}><b className="amount">{money(toCopy, b.currency, locale)}</b><CopyButton text={(toCopy / 100).toFixed(2)} label={p.copy} /></span></div>
+          <TaxBreakdown t={t} b={b} m={(v, cur = "ILS") => money(Number(v), cur, locale)} />
           {b.due_at && <div className="row small" style={{ gap: 8 }}><span>{p.dueBy(shortDate(b.due_at, locale))}</span>{b.overdue && <span className="badge badge-warn">{p.overdue}</span>}</div>}
         </div>
         <section className="section">
@@ -47,9 +51,12 @@ export default async function Pay({ searchParams }: { searchParams: Promise<Reco
           <div className="section-head"><h2>{p.reportTitle}</h2></div>
           <form action={reportPayment} className="card stack">
             <input type="hidden" name="org" value={org.id} /><input type="hidden" name="creator" value={sp.creator} /><input type="hidden" name="key" value={key} />
-            <label className="field"><span>{p.amount}</span><input name="amount" required inputMode="decimal" dir="ltr" defaultValue={amount} /></label>
+            <label className="field"><span>{p.tx.amountField}</span><input name="amount" required inputMode="decimal" dir="ltr" defaultValue={amount} /></label>
             <p className="small muted" style={{ margin: 0 }}>{p.partialNote}</p>
-            <label className="field"><span>{p.vat}</span><input name="vat" inputMode="decimal" dir="ltr" defaultValue="0" /></label>
+            <p className="small" style={{ margin: 0 }}>{b.vat_bps === null || b.vat_bps === undefined ? p.tx.vatNotAdded : p.tx.vatAuto((Number(b.vat_bps) / 100).toFixed(0))}</p>
+            <label className="field"><span>{p.tx.withholdingField}</span><input name="withholding" inputMode="decimal" dir="ltr" defaultValue="0" /></label>
+            <label className="field"><span>{p.tx.withholdingRef}</span><input name="withholding_ref" maxLength={120} /></label>
+            <p className="small muted" style={{ margin: 0 }}>{p.tx.withholdingNote}</p>
             <label className="field"><span>{t.money.method}</span>
               <select name="method" defaultValue={d?.method === "bit" || d?.method === "paybox" ? d.method : "bank_transfer"}>{Object.entries(t.money.methods).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
             <label className="field"><span>{p.paidOn}</span><input type="date" name="paid_on" defaultValue={new Date().toISOString().slice(0, 10)} /></label>

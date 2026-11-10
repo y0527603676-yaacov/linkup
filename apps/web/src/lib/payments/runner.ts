@@ -18,10 +18,18 @@ export async function runBilling(rpc: Rpc, pay: PaymentProvider, docs: DocumentP
   const due = await rpc<Claimed[]>("billing_claim_due", { p_limit: 50 });
   for (const c of due) {
     if (c.provider !== pay.name) { r.errors.push(`provider_mismatch:${c.charge_id}`); continue; }
-    let res;
+    let res: Awaited<ReturnType<PaymentProvider["charge"]>>;
     try {
-      res = await pay.charge({ chargeId: c.charge_id, invoiceId: c.invoice_id, amountMinor: Number(c.amount_minor), currency: c.currency,
-        tokenRef: c.token_ref, idempotencyKey: c.idempotency_key });
+      // A later attempt first checks whether an earlier one already went through (lost response) → never charge twice.
+      const earlier = c.attempt > 1 && pay.findCharge ? await pay.findCharge(c.invoice_id) : null;
+      if (earlier) {
+        res = { ok: true, providerRef: earlier.providerRef, document: earlier.document };
+      } else {
+        const inv = await getInvoice(c.invoice_id);
+        res = await pay.charge({ chargeId: c.charge_id, invoiceId: c.invoice_id, amountMinor: Number(c.amount_minor), currency: c.currency,
+          tokenRef: c.token_ref, idempotencyKey: c.idempotency_key,
+          invoice: { feeMinor: Number(inv.fees_minor), vatMinor: Number(inv.vat_minor), offsetMinor: Number(inv.credit_minor) } });
+      }
     } catch (e) {
       res = { ok: false as const, code: "provider_error", message: String((e as Error).message).slice(0, 200) };
     }
@@ -31,11 +39,12 @@ export async function runBilling(rpc: Rpc, pay: PaymentProvider, docs: DocumentP
       r.charged++;
       try {
         const inv = await getInvoice(c.invoice_id);
-        const d = await docs.issueInvoiceReceipt({ invoiceId: c.invoice_id, storeOrgId: c.store_org_id, feeMinor: Number(inv.fees_minor),
+        // Document issued together with the charge (Morning) → record it; otherwise ask the document provider.
+        const d = res.ok && res.document ? res.document : await docs.issueInvoiceReceipt({ invoiceId: c.invoice_id, storeOrgId: c.store_org_id, feeMinor: Number(inv.fees_minor),
           vatMinor: Number(inv.vat_minor), totalMinor: Number(inv.total_minor), offsetMinor: Number(inv.credit_minor), currency: inv.currency,
           paymentRef: res.ok ? res.providerRef : "" });
         await rpc("billing_record_document", { p_invoice: c.invoice_id, p_doc_type: d.docType, p_number: d.number, p_issued_on: d.issuedOn,
-          p_amount_minor: d.amountMinor, p_vat_minor: d.vatMinor, p_provider: docs.name, p_note: null });
+          p_amount_minor: d.amountMinor, p_vat_minor: d.vatMinor, p_provider: docs.name, p_note: d.providerDocId ? `provider doc ${d.providerDocId}` : null });
         r.documents++;
       } catch (e) {
         r.errors.push(`document:${c.invoice_id}:${(e as Error).message}`);   // shows in the exceptions queue as "document_missing"

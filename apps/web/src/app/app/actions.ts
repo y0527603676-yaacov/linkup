@@ -189,9 +189,10 @@ export async function reportPayment(form: FormData) {
   const creator = str(form, "creator");
   const sb = await getSupabase();
   const { data, error } = await sb.rpc("report_creator_payment", {
-    p_store: org, p_creator: creator, p_amount_minor: pctToBps(str(form, "amount"), -1), p_vat_minor: pctToBps(str(form, "vat") || "0", 0),
+    p_store: org, p_creator: creator, p_amount_minor: pctToBps(str(form, "amount"), -1), p_vat_minor: null,   // VAT: set by the server from the verified basis only
     p_method: str(form, "method") || "bank_transfer", p_paid_on: str(form, "paid_on") || null, p_reference: str(form, "reference") || null,
-    p_idempotency_key: str(form, "key") || null,
+    p_idempotency_key: str(form, "key") || null, p_currency: "ILS",
+    p_withholding_minor: pctToBps(str(form, "withholding") || "0", -1), p_withholding_ref: str(form, "withholding_ref") || null,
   });
   if (error) redirect(back("/app/money/pay", org, { creator, error: errorCode(error) }));
   const file = form.get("proof");
@@ -293,6 +294,7 @@ export async function adminAction(form: FormData) {
         p_withholding_minor: pctToBps(str(form, "withholding") || "0", 0) })
     : op === "resolve" ? await sb.rpc("resolve_invoice_dispute", { p_dispute: str(form, "id"), p_resolution: str(form, "resolution") })
     : op === "contact" ? await sb.rpc("mark_contact_handled", { p_id: str(form, "id") })
+    : op === "vatbasis" ? await sb.rpc("set_commission_vat_basis", { p_agreement: str(form, "id"), p_note: str(form, "note") })
     : op === "retry" ? await sb.rpc("retry_charge_now", { p_invoice: str(form, "id") })
     : op === "refund" ? await sb.rpc("request_refund", { p_charge: str(form, "id"), p_amount_minor: pctToBps(str(form, "amount"), -1), p_reason: str(form, "reason") })
     : op === "notice" ? await sb.rpc("record_fee_notice", { p_term: str(form, "term"), p_event: str(form, "event"), p_channel: str(form, "channel"),

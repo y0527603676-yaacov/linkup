@@ -44,6 +44,7 @@ export default async function OfferPage({ params, searchParams }: { params: Prom
             : <><li>{p.s1(rate, offer.from_name)}</li><li>{p.s2(offer.coupon_discount_pct)}</li><li>{p.s3}</li><li>{p.s4(pct(offer.platform_fee_bps, locale), offer.founders_months)}</li></>}
         </ul>
         <p className="muted small">{p.base}</p>
+        <p className="muted small">{t.offer.vatNote}</p>
         {!open ? <p className="alert alert-error">{offer.status === "expired" ? p.expired : p.handled}</p>
           : !auth.user ? <Link className="btn btn-primary btn-block" href={`/login?next=${encodeURIComponent(`/o/${token}`)}`}>{p.accept}</Link>
           : (
