@@ -55,6 +55,7 @@ beforeAll(async () => {
   const l = (await q<{ id: string; attribution_id: string }>(`select id, attribution_id from commission_ledger where party_role = 'platform' limit 1`))[0]!;
   await backdate(`insert into referral_rewards(referral_id, referrer_org_id, ledger_id, attribution_id, share_bps, amount_minor, currency, idempotency_key)
                   values (gen_random_uuid(), $1, $2, $3, 4000, 500, 'ILS', 'test:wallet')`, [org.S, l.id, l.attribution_id]);
+  await q(`update app_settings set value = 'true' where key = 'reward_settlement_approved'`); // as if the accountant had approved settlement
 }, 60_000);
 
 describe("tax profiles", () => {

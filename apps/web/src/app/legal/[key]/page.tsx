@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { PublicPage } from "@/components/Site";
 import { getT } from "@/i18n";
 import { getSupabase } from "@/lib/supabase/server";
-import { latestDocs, OPERATOR } from "@/lib/legal";
+import { BILINGUAL, latestDocs, OPERATOR } from "@/lib/legal";
 import { shortDate } from "@/lib/format";
 
 type Row = { locale: string; version: number; title: string; body: string; effective_from: string | null; published_at: string | null; status?: string };
@@ -35,17 +35,22 @@ export default async function LegalDoc({ params, searchParams }: { params: Promi
   if (!doc) notFound();
   const others = draft ? [] : (await latestDocs(locale)).filter((d) => d.doc_key !== key);
   const otherLang = doc.locale === "he" ? "en" : "he";
+  const bilingual = BILINGUAL.has(key);
   const qs = (lang: string) => `?lang=${lang}${sp.draft ? `&draft=${sp.draft}` : ""}${sp.v ? `&v=${sp.v}` : ""}`;
   return (
     <PublicPage path={`/legal/${key}`}>
       <article className="container" style={{ padding: "40px 16px 80px", maxWidth: 760 }} dir={doc.locale === "he" ? "rtl" : "ltr"} lang={doc.locale}>
-        <p className="small row between"><Link href="/legal">{l.back}</Link><Link href={`/legal/${key}${qs(otherLang)}`}>{otherLang === "en" ? "English" : "עברית"}</Link></p>
+        <p className="small row between"><Link href="/legal">{l.back}</Link>{!bilingual && <Link href={`/legal/${key}${qs(otherLang)}`}>{otherLang === "en" ? "English" : "עברית"}</Link>}</p>
         {draft && <p className="alert alert-warn">{l.draftBadge}</p>}
         <h1>{doc.title}</h1>
-        <p className="small muted">{l.ver(doc.version)}{doc.effective_from || doc.published_at ? ` · ${l.effective(shortDate(doc.effective_from ?? doc.published_at!, locale))}` : ""}</p>
+        {(doc.effective_from || doc.published_at) && <p className="small muted">{l.effective(shortDate(doc.effective_from ?? doc.published_at!, locale))}</p>}
         <div className="legal-body" style={{ whiteSpace: "pre-wrap", lineHeight: 1.75, overflowWrap: "anywhere", unicodeBidi: "plaintext" }}>
-          {/* The stored text is shown exactly; only the source's **bold** markers are rendered as bold. */}
-          {doc.body.split(/(\*\*[^*\n]+\*\*)/g).map((part, k) => /^\*\*[^*\n]+\*\*$/.test(part) ? <b key={k}>{part.slice(2, -2)}</b> : part)}
+          {/* The stored text is shown exactly. Display only: **bold** markers render as bold; in the bilingual
+              document each quoted wording is isolated on its own line with its own direction. */}
+          {doc.body.split(/(\*\*[^*\n]+\*\*)/g).map((part, k) => /^\*\*[^*\n]+\*\*$/.test(part) ? <b key={k}>{part.slice(2, -2)}</b>
+            : bilingual ? part.split(/('[^'\n]+')/g).map((seg, j) => /^'[^'\n]+'$/.test(seg)
+                ? <bdi key={`${k}-${j}`} dir="auto" style={{ display: "block", margin: "4px 0", paddingInlineStart: 12, borderInlineStart: "3px solid var(--line, #e5e5ef)" }}>{seg}</bdi>
+                : bilingual && seg.trim() === "/" ? null : seg) : part)}
         </div>
         <p className="small muted" dir="ltr" style={{ marginTop: 24, overflowWrap: "anywhere" }}>{OPERATOR}</p>
         {others.length > 0 && (

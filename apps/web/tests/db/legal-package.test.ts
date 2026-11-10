@@ -46,6 +46,7 @@ beforeAll(async () => {
   code = (await rpc(u.c!, "join_opportunity", { p_opportunity: opp, p_creator: org.C })).code;
   const t = (await rpc(u.s!, "invite_team_member", { p_org: org.S, p_email: "staff@lp.test", p_role: "member" })).token;
   await rpc(u.staff!, "accept_team_invite", { p_token: t });
+  await q(`update app_settings set value = 'true' where key = 'reward_settlement_approved'`); // as if the accountant had approved settlement
 }, 60_000);
 
 describe("legal documents v1.0", () => {
@@ -110,6 +111,11 @@ describe("rate increase without acceptance → orderly wind-down", () => {
     await backdate(`update fee_terms set effective_until = now() - interval '20 days' where store_org_id = $1 and kind = 'founders'`, [org.S]);
     await backdate(`update fee_terms set effective_from = now() - interval '20 days' where store_org_id = $1 and kind = 'standard' and source <> 'rate_change'`, [org.S]);
     await backdate(`update fee_terms set effective_from = now() - interval '1 day' where store_org_id = $1 and source = 'rate_change'`, [org.S]);
+    // Without proven delivery of the notice, nothing pauses.
+    expect(await q(`select public.store_new_activity_blocked($1) b`, [org.S])).toEqual([{ b: false }]);
+    const tid = (await q(`select id from fee_terms where store_org_id = $1 and source = 'rate_change'`, [org.S]))[0].id;
+    await backdate(`insert into fee_change_notices(term_id, store_org_id, event, channel, recipient, reference, occurred_at)
+                    values ($1, $2, 'delivered', 'email', 's@lp.test', 'delivered', now() - interval '40 days')`, [tid, org.S]);
     expect(await q(`select public.store_new_activity_blocked($1) b`, [org.S])).toEqual([{ b: true }]);
     await expect(rpc(u.s!, "create_campaign", { p_store: org.S, p_title: "New launch", p_description: null, p_commission_bps: 1500,
       p_starts_at: new Date().toISOString(), p_ends_at: inDays(10), p_product_ids: [] })).rejects.toThrow(/store_rate_not_accepted/);

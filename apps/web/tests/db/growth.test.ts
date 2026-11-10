@@ -63,6 +63,7 @@ beforeAll(async () => {
   })) u[k] = { role: "authenticated", userId: await createUser(db, email) };
   await q(`insert into platform_admins(user_id) values ($1)`, [(u.admin as any).userId]);
   await q(`update app_settings set value = 'true' where key = 'invoicing_tax_approved'`);
+  await q(`update app_settings set value = 'true' where key = 'reward_settlement_approved'`); // as if the accountant had approved settlement
 
   org.R = await rpc(u.r!, "create_organization", { p_type: "creator", p_name: "Ref Creator" });
   org.B = await rpc(u.b!, "create_organization", { p_type: "store", p_name: "Ref Store" });

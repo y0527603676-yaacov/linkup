@@ -4,7 +4,7 @@ import { errorText, money, shortDate } from "@/lib/format";
 import { recordPayout, respondPayout, respondFee, disputeInvoice } from "../actions";
 
 type Bal = { other_org_id: string; other_name: string; currency: string; pending_minor: number | null; approved_unpaid_minor: number; paid_minor: number; due_at: string | null; overdue: boolean; oldest_unpaid_approved_at: string | null };
-type Term = { id: string; kind: string; fee_bps: number; effective_from: string | null; effective_until: string | null; status: string };
+type Term = { id: string; kind: string; fee_bps: number; effective_from: string | null; effective_until: string | null; status: string; delivered_at?: string | null; starts_at?: string | null };
 const pct = (bps: number) => `${(bps / 100).toLocaleString("en", { maximumFractionDigits: 2 })}%`;
 
 export default async function Money({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
@@ -57,9 +57,11 @@ export default async function Money({ searchParams }: { searchParams: Promise<Re
             {terms.filter((x) => x.status === "proposed").map((x) => (
               <form key={x.id} action={respondFee} className="card card-flat stack" style={{ borderColor: "var(--warn, #c77700)" }}>
                 <input type="hidden" name="org" value={org.id} /><input type="hidden" name="term" value={x.id} />
-                <span>{t.lc.rate(pct((fee as any).current_bps ?? 0), pct(x.fee_bps), d(x.effective_from))}</span>
-                <div className="row" style={{ flexWrap: "wrap" }}><button className="btn btn-primary btn-sm" name="accept" value="1">{t.lc.rateAccept}</button>
-                  <button className="btn btn-ghost btn-sm" name="accept" value="0">{t.lc.rateDecline}</button></div>
+                <span>{t.lc.rate(pct((fee as any).current_bps ?? 0), pct(x.fee_bps), d(x.starts_at ?? x.effective_from))}</span>
+                {x.delivered_at ? (
+                  <div className="row" style={{ flexWrap: "wrap" }}><button className="btn btn-primary btn-sm" name="accept" value="1">{t.lc.rateAccept}</button>
+                    <button className="btn btn-ghost btn-sm" name="accept" value="0">{t.lc.rateDecline}</button></div>
+                ) : <span className="small muted">{m.noticePending}</span>}
               </form>
             ))}
           </div>

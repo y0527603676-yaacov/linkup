@@ -12,6 +12,9 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
   const a = t.admin;
   const [{ data }, { data: ai }, { data: ld }, { data: cm }] = await Promise.all([sb.rpc("admin_overview"), sb.rpc("admin_invoices"),
     sb.rpc("legal_admin_documents"), sb.rpc("admin_contact_messages")]);
+  const { data: fn } = await sb.rpc("admin_fee_notices");
+  const notices = (fn ?? []) as any[];
+  const settings = ((data as any)?.settings ?? {}) as Record<string, any>;   // all settings, from admin_overview
   const legalDocs = (ld ?? []) as any[];
   const contacts = (cm ?? []) as any[];
   const d = data as Record<string, any>;
@@ -54,6 +57,7 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
 
       <section className="section"><H>{a.invoices}</H>
         {!A.tax_approved && <Alert kind="warn" text={a.gated} />}
+        {settings.reward_settlement_approved !== true && <Alert kind="warn" text={a.settlementGated} />}
         <div className="row" style={{ marginBottom: 12, gap: 8, flexWrap: "wrap" }}>
           <form className="row" method="get">{hidden}
             <input type="date" name="preview" defaultValue={previewFor ?? period} style={{ width: "auto" }} /><button className="btn btn-ghost btn-sm">{a.preview}</button></form>
@@ -122,8 +126,35 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
         </section>
       )}
 
+      {notices.length > 0 && (
+        <section className="section"><H>{a.notices}</H>
+          <div className="stack">{notices.map((n) => (
+            <div className="card card-flat stack small" key={n.term_id}>
+              <b>{n.store} · {pct(n.fee_bps)} · {shortDate(n.effective_from, locale)} · {n.status}</b>
+              <div>{n.delivered_at ? `${a.earliestStart}: ${shortDate(n.starts_at, locale)}` : a.notDelivered}</div>
+              <ul style={{ margin: 0, paddingInlineStart: 18 }}>{(n.events ?? []).map((e: any, k: number) => (
+                <li key={k}>{a.noticeEvent[e.event]} · {e.channel ?? ""} {e.recipient ? `· ${e.recipient}` : ""} {e.reference ? `· ${e.reference}` : ""} · {shortDate(e.at, locale)}</li>))}</ul>
+              <form action={adminAction} className="row" style={{ flexWrap: "wrap" }}>{hidden}<input type="hidden" name="op" value="notice" /><input type="hidden" name="term" value={n.term_id} />
+                <select name="event" style={{ width: "auto" }}>{["sent", "delivered", "failed"].map((k) => <option key={k} value={k}>{a.noticeEvent[k]}</option>)}</select>
+                <select name="channel" style={{ width: "auto" }}>{["email", "whatsapp", "in_app", "registered_mail", "other"].map((k) => <option key={k} value={k}>{k}</option>)}</select>
+                <input name="recipient" placeholder={a.recipient} style={{ width: 150 }} /><input name="reference" placeholder={a.noticeRef} style={{ width: 150 }} />
+                <input type="datetime-local" name="at" style={{ width: "auto" }} /><button className="btn btn-ghost btn-sm">{a.recordNotice}</button></form>
+              {n.status === "declined" && (n.wind_down ? (
+                <form action={adminAction} className="row">{hidden}<input type="hidden" name="id" value={n.wind_down.id} />
+                  <span>{a.planWindDown}: {shortDate(n.wind_down.end_at, locale)} · {n.wind_down.status}</span>
+                  {n.wind_down.status === "planned" && <><button className="btn btn-ghost btn-sm" name="op" value="wd_complete">{a.complete}</button>
+                    <button className="btn btn-ghost btn-sm" name="op" value="wd_cancel">{a.cancel}</button></>}</form>
+              ) : settings.wind_down_notice_days == null ? <p className="alert alert-warn" style={{ margin: 0 }}>{a.windDownUndecided}</p> : (
+                <form action={adminAction} className="row" style={{ flexWrap: "wrap" }}>{hidden}<input type="hidden" name="op" value="wd_plan" /><input type="hidden" name="term" value={n.term_id} />
+                  <input type="date" name="end" required style={{ width: "auto" }} /><input name="note" required placeholder={a.note} style={{ flex: 1, minWidth: 140 }} />
+                  <button className="btn btn-ghost btn-sm">{a.planWindDown}</button></form>))}
+            </div>))}</div>
+        </section>
+      )}
+
       <section className="section"><H>{t.legal.drafts}</H>
         <p className="small muted">{t.legal.draftNote}</p>
+        <p className="small alert alert-warn">{a.nextVersionFix}</p>
         <div className="list">{legalDocs.map((x) => (
           <a className="item" key={x.id} href={`/legal/${x.doc_key}?lang=${x.locale}${x.status === "draft" ? `&draft=${x.version}` : ""}`}>
             <div className="grow"><div className="title">{x.title}</div>

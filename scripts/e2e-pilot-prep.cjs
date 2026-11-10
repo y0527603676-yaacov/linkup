@@ -55,7 +55,9 @@ const OWNER = 'a0000000-0000-0000-0000-000000000001', NEWU = 'a0000000-0000-0000
   ok(sql('select count(*) from invoices') === '0', 'preview creates nothing');
 
   // 3. Switch on (local test DB only) → generate → VAT split recorded
+  ok(sql("select value from app_settings where key='reward_settlement_approved'") === 'false', 'reward settlement blocked by default (accounting decision pending)');
   sql("update app_settings set value='true' where key='invoicing_tax_approved'");
+  sql("update app_settings set value='true' where key='reward_settlement_approved'");   // local test of the approved flow only
   await go(s, `/app/admin?org=${store}`);
   await s.fill('input[name=period]', prevMonth); await submit(s, 'button:has-text("הפקת דרישות תשלום לחודש")');
   const inv = sql(`select fees_minor||'|'||vat_minor||'|'||reward_offset_minor||'|'||reward_vat_minor||'|'||total_minor||'|'||coalesce(due_at::text,'none') from invoices where store_org_id='${store}'`);
@@ -92,6 +94,15 @@ const OWNER = 'a0000000-0000-0000-0000-000000000001', NEWU = 'a0000000-0000-0000
   await submit(s, 'form:has(input[name=op][value=rate]) button');
   await go(s, `/app/money?org=${store}`);
   ok((await s.content()).includes('התעריף הרגיל שלך ישתנה'), 'store sees the proposed increase (approved wording)');
+  ok((await s.content()).includes('טרם נמסרה באופן מתועד') && await s.locator('button:has-text("אני מאשר/ת את התעריף החדש")').count() === 0, 'no acceptance before documented delivery');
+  await go(s, `/app/admin?org=${store}`);
+  const nf = s.locator('form:has(input[name=op][value=notice])');
+  await nf.locator('select[name=event]').selectOption('delivered'); await nf.locator('select[name=channel]').selectOption('email');
+  await nf.locator('input[name=recipient]').fill('owner@flow.test'); await nf.locator('input[name=reference]').fill('email delivered, no bounce');
+  await Promise.all([s.waitForNavigation({ waitUntil: 'networkidle' }), nf.locator('button').click()]);
+  ok(sql("select string_agg(event, ',' order by occurred_at) from fee_change_notices") === 'created,delivered', 'notice: created + documented delivery');
+  ok(await s.waitForSelector('text=תחולה מוקדמת', { timeout: 10000 }).then(() => true, () => false), 'admin sees the earliest start (30 days after delivery)');
+  await go(s, `/app/money?org=${store}`);
   await s.screenshot({ path: `${SHOTS}/pp-money-he.png`, fullPage: true });
   ok(await noOverflow(s), 'he money page: no horizontal overflow at phone width');
   await submit(s, 'button:has-text("ניהול סיום פעילות")');

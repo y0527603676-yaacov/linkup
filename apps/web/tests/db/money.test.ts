@@ -39,6 +39,7 @@ beforeAll(async () => {
   for (const k of ["rs", "rc", "s", "c", "admin"]) u[k] = { role: "authenticated", userId: await createUser(db, `${k}@money.test`) };
   await q(`insert into platform_admins(user_id) values ($1)`, [(u.admin as any).userId]);
   await q(`update app_settings set value = 'true' where key = 'invoicing_tax_approved'`);
+  await q(`update app_settings set value = 'true' where key = 'reward_settlement_approved'`); // as if the accountant had approved settlement
   org.RS = await rpc(u.rs!, "create_organization", { p_type: "store", p_name: "Referrer Store" });
   org.RC = await rpc(u.rc!, "create_organization", { p_type: "creator", p_name: "Referrer Creator" });
   const rc = async (o: string) => (await q<{ c: string }>(`select referral_code c from organizations where id=$1`, [o]))[0]!.c;

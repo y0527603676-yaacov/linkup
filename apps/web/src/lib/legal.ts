@@ -21,3 +21,6 @@ export async function latestDocs(locale: string) {
   }
   return [...best.values()].sort((a, b) => a.sort_order - b.sort_order);
 }
+
+/** Documents whose single text is bilingual item by item (shown once, not as two language pages). */
+export const BILINGUAL = new Set(["interface-notices"]);

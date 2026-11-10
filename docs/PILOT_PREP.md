@@ -40,3 +40,13 @@ Neither migration is applied to production. `invoicing_tax_approved` stays `fals
 - Referral rewards of a foreign-resident store or referrer: VAT treatment. Currently not settled; the reward stays in the wallet.
 - Withholding tax on reward transfers: not built. Each transfer requires the referrer's document.
 - What happens to a store that does not accept a future rate increase. Its current rate continues; nothing is terminated.
+
+## Final pilot items (migration `20261111100300_pilot_final.sql`)
+
+- **Rate-increase notices:** `fee_change_notices` records each event (created / sent / delivered / failed) with channel, recipient, reference and time. These records are append-only. A store can accept only after a documented delivery. The increase starts at the latest of: the stated date, delivery + 30 days, and the moment of acceptance. Without proven delivery, nothing applies and nothing pauses.
+- **Orderly wind-down after a refusal:**
+  - The plan, its completion and its cancellation are all explicit admin actions; nothing happens automatically.
+  - Completing a plan ends existing collaborations for future attribution only. Recorded sales, commissions, rewards and coupons are not touched.
+  - Planning is refused until counsel sets `wind_down_notice_days`.
+- **Settlements awaiting accounting decisions:** while `reward_settlement_approved` is `false`, no offset is taken on payment requests and no cash reward transfer is possible. Rewards stay in the balance.
+- **Legal text correction pending for v1.1:** see `docs/legal/NEXT_VERSION_CORRECTIONS.md` (Google Fonts sentence).

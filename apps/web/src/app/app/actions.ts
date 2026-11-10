@@ -237,6 +237,11 @@ export async function adminAction(form: FormData) {
         p_withholding_minor: pctToBps(str(form, "withholding") || "0", 0) })
     : op === "resolve" ? await sb.rpc("resolve_invoice_dispute", { p_dispute: str(form, "id"), p_resolution: str(form, "resolution") })
     : op === "contact" ? await sb.rpc("mark_contact_handled", { p_id: str(form, "id") })
+    : op === "notice" ? await sb.rpc("record_fee_notice", { p_term: str(form, "term"), p_event: str(form, "event"), p_channel: str(form, "channel"),
+        p_recipient: str(form, "recipient") || null, p_reference: str(form, "reference") || null, p_occurred_at: str(form, "at") ? new Date(str(form, "at")).toISOString() : null })
+    : op === "wd_plan" ? await sb.rpc("plan_collaboration_wind_down", { p_term: str(form, "term"), p_end_at: new Date(str(form, "end")).toISOString(), p_note: str(form, "note") })
+    : op === "wd_complete" ? await sb.rpc("complete_collaboration_wind_down", { p_plan: str(form, "id") })
+    : op === "wd_cancel" ? await sb.rpc("cancel_collaboration_wind_down", { p_plan: str(form, "id") })
     : op === "doc" ? await sb.rpc("record_accounting_document", { p_issuer: str(form, "issuer"), p_doc_type: str(form, "doc_type"), p_number: str(form, "number"),
         p_issued_on: str(form, "date"), p_invoice: str(form, "invoice") || null, p_reward_payout: null,
         p_amount_minor: pctToBps(str(form, "amount"), -1), p_vat_minor: pctToBps(str(form, "vat") || "0", 0), p_software: null, p_note: null })
