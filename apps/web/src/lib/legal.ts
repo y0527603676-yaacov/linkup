@@ -1,9 +1,13 @@
 import "server-only";
 import { getSupabase } from "./supabase/server";
 
+/** Operator details exactly as stated in the legal package (LINKUP_legal_package_2026-11-10.md). */
+export const OPERATOR =
+  "Operator / מפעיל: maayan shpergel, עוסק מורשה 037093390, trading as heleni jewelry. LINKUP is a brand, not a corporation. Address: yefe nof 37, sefat, israel. Email: y0527603676@gmail.com. Phone: 0525080979. Preferred channel: website contact form.";
+
 export type Doc = { doc_key: string; locale: string; version: number; title: string; effective_from: string | null; published_at: string | null; sort_order: number };
 
-/** Latest published version of each document; the viewer's language first, the other language as fallback. */
+/** Latest published, in-force version of each document; the viewer's language first, the other as fallback. */
 export async function latestDocs(locale: string) {
   const sb = await getSupabase();
   const { data } = await sb.from("legal_documents").select("doc_key, locale, version, title, effective_from, published_at, sort_order")
@@ -17,4 +21,3 @@ export async function latestDocs(locale: string) {
   }
   return [...best.values()].sort((a, b) => a.sort_order - b.sort_order);
 }
-

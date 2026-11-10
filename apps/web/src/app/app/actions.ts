@@ -24,7 +24,8 @@ export async function createOrg(form: FormData) {
   const ref = (await cookies()).get("lk_ref")?.value ?? null;
   const legal = form.getAll("legal").map(String).filter(Boolean);
   if (legal.length) {
-    const { error: le } = await sb.rpc("accept_legal", { p_doc_keys: legal, p_type: "signup", p_org: null });
+    if (str(form, "agree") !== "1") redirect(`/app/new?error=legal_acceptance_required&type=${encodeURIComponent(type)}&next=${encodeURIComponent(next)}`);
+    const { error: le } = await sb.rpc("accept_legal", { p_doc_keys: legal, p_type: "signup", p_org: null, p_locale: await getLocale() });
     if (le) redirect(`/app/new?error=${errorCode(le)}&type=${encodeURIComponent(type)}&next=${encodeURIComponent(next)}`);
   }
   const { data, error } = await sb.rpc("create_organization", {
@@ -53,7 +54,8 @@ export async function connectStore(_prev: ConnectState, form: FormData): Promise
   const sb = await getSupabase();
   const legal = form.getAll("legal").map(String).filter(Boolean);
   if (legal.length) {
-    const { error: le } = await sb.rpc("accept_legal", { p_doc_keys: legal, p_type: "store_connection", p_org: str(form, "org") });
+    if (str(form, "agree") !== "1") return { error: "legal_acceptance_required" };
+    const { error: le } = await sb.rpc("accept_legal", { p_doc_keys: legal, p_type: "store_connection", p_org: str(form, "org"), p_locale: await getLocale() });
     if (le) return { error: errorCode(le) };
   }
   const { data, error } = await sb.rpc("create_store_connection", { p_org: str(form, "org"), p_site_url: str(form, "site") });
@@ -86,6 +88,12 @@ export async function acceptOffer(form: FormData) {
   let org = str(form, "org");
   const sb = await getSupabase();
   if (!org) {
+    const legal = form.getAll("legal").map(String).filter(Boolean);
+    if (legal.length) {
+      if (str(form, "agree") !== "1") redirect(`/o/${token}?error=legal_acceptance_required`);
+      const { error: le } = await sb.rpc("accept_legal", { p_doc_keys: legal, p_type: "signup", p_org: null, p_locale: await getLocale() });
+      if (le) redirect(`/o/${token}?error=${errorCode(le)}`);
+    }
     const { data, error } = await sb.rpc("create_organization", {
       p_type: str(form, "type"), p_name: str(form, "name"), p_website_url: str(form, "website") || null,
       p_ref_code: null, p_locale: await getLocale(),
@@ -225,7 +233,10 @@ export async function adminAction(form: FormData) {
     : op === "rate" ? await sb.rpc("schedule_standard_rate_change", { p_new_bps: pctToBps(str(form, "pct"), -1), p_effective_from: new Date(str(form, "from")).toISOString(), p_note: str(form, "note") || null })
     : op === "individual" ? await sb.rpc("set_individual_fee", { p_store: str(form, "store"), p_fee_bps: pctToBps(str(form, "pct"), -1), p_effective_from: new Date(str(form, "from")).toISOString(), p_effective_until: str(form, "until") ? new Date(str(form, "until")).toISOString() : null, p_note: str(form, "note") })
     : op === "transfer" ? await sb.rpc("record_reward_transfer", { p_org: str(form, "target"), p_currency: "ILS", p_reference: str(form, "reference") || null,
-        p_doc_type: str(form, "doc_type"), p_doc_number: str(form, "doc_number"), p_doc_date: str(form, "doc_date") || null })
+        p_doc_type: str(form, "doc_type"), p_doc_number: str(form, "doc_number"), p_doc_date: str(form, "doc_date") || null,
+        p_withholding_minor: pctToBps(str(form, "withholding") || "0", 0) })
+    : op === "resolve" ? await sb.rpc("resolve_invoice_dispute", { p_dispute: str(form, "id"), p_resolution: str(form, "resolution") })
+    : op === "contact" ? await sb.rpc("mark_contact_handled", { p_id: str(form, "id") })
     : op === "doc" ? await sb.rpc("record_accounting_document", { p_issuer: str(form, "issuer"), p_doc_type: str(form, "doc_type"), p_number: str(form, "number"),
         p_issued_on: str(form, "date"), p_invoice: str(form, "invoice") || null, p_reward_payout: null,
         p_amount_minor: pctToBps(str(form, "amount"), -1), p_vat_minor: pctToBps(str(form, "vat") || "0", 0), p_software: null, p_note: null })
@@ -245,20 +256,40 @@ export async function respondFee(form: FormData) {
 /* ---------- Legal: one-time acceptance for existing users / re-acceptance ---------- */
 export async function acceptPendingLegal(form: FormData) {
   const sb = await getSupabase();
-  const keys = form.getAll("legal").map(String).filter(Boolean);
-  const required = form.getAll("required").map(String).filter(Boolean);
   const next = safeNext(str(form, "next") || "/app");
-  if (!required.every((k) => keys.includes(k))) redirect(`/legal/accept?error=legal_acceptance_required&ctx=${encodeURIComponent(str(form, "ctx"))}&next=${encodeURIComponent(next)}`);
-  const ctx = (str(form, "ctx") || "signup").split(",").filter((c) => ["signup", "store", "creator"].includes(c));
+  const ctxRaw = str(form, "ctx");
+  const back = `/legal/accept?ctx=${encodeURIComponent(ctxRaw)}&next=${encodeURIComponent(next)}`;
+  const general = form.getAll("legal").map(String).filter(Boolean);
+  const store = form.getAll("legal_store").map(String).filter(Boolean);
+  if ((general.length && str(form, "agree") !== "1") || (store.length && str(form, "agree_store") !== "1")) redirect(`${back}&error=legal_acceptance_required`);
+  const ctx = (ctxRaw || "signup").split(",").filter((c) => ["signup", "store", "creator"].includes(c));
   const lists = await Promise.all(ctx.map((c) => sb.rpc("legal_pending", { p_context: c })));
   const re = new Set(lists.flatMap((r) => (r.data ?? []) as { doc_key: string; reacceptance: boolean }[]).filter((p) => p.reacceptance).map((p) => p.doc_key));
-  const fresh = keys.filter((k) => !re.has(k)), again = keys.filter((k) => re.has(k));
-  for (const [list, type] of [[fresh, "existing_user"], [again, "reacceptance"]] as const) {
+  const locale = await getLocale();
+  const keys = [...general, ...store];
+  for (const [list, type] of [[keys.filter((k) => !re.has(k)), "existing_user"], [keys.filter((k) => re.has(k)), "reacceptance"]] as const) {
     if (!list.length) continue;
-    const { error } = await sb.rpc("accept_legal", { p_doc_keys: list, p_type: type, p_org: null });
-    if (error) redirect(`/legal/accept?error=${errorCode(error)}&next=${encodeURIComponent(next)}`);
+    const { error } = await sb.rpc("accept_legal", { p_doc_keys: list, p_type: type, p_org: null, p_locale: locale });
+    if (error) redirect(`${back}&error=${errorCode(error)}`);
   }
   redirect(next);
+}
+
+/* ---------- Payment-request dispute (store admin) ---------- */
+export async function disputeInvoice(form: FormData) {
+  const org = str(form, "org");
+  const sb = await getSupabase();
+  const { error } = await sb.rpc("open_invoice_dispute", { p_invoice: str(form, "invoice"), p_disputed_minor: pctToBps(str(form, "amount"), -1),
+    p_reason: str(form, "reason"), p_evidence: str(form, "evidence") || null });
+  redirect(back("/app/money", org, error ? { error: errorCode(error) } : { ok: "1" }));
+}
+
+/* ---------- Website contact form ---------- */
+export async function sendContact(form: FormData) {
+  const sb = await getSupabase();
+  const { error } = await sb.rpc("submit_contact_message", { p_name: str(form, "name"), p_email: str(form, "email"),
+    p_topic: str(form, "topic"), p_message: str(form, "message") });
+  redirect(error ? `/contact?error=${errorCode(error)}` : "/contact?sent=1");
 }
 
 /* ---------- Business tax profile (activity admin) ---------- */

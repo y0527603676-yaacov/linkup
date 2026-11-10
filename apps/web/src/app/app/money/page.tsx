@@ -1,9 +1,9 @@
 import { AppShell, PageHead, Alert } from "@/components/AppShell";
 import { loadApp } from "@/lib/orgs";
 import { errorText, money, shortDate } from "@/lib/format";
-import { recordPayout, respondPayout, respondFee } from "../actions";
+import { recordPayout, respondPayout, respondFee, disputeInvoice } from "../actions";
 
-type Bal = { other_org_id: string; other_name: string; currency: string; pending_minor: number | null; approved_unpaid_minor: number; paid_minor: number; due_at: string | null; overdue: boolean };
+type Bal = { other_org_id: string; other_name: string; currency: string; pending_minor: number | null; approved_unpaid_minor: number; paid_minor: number; due_at: string | null; overdue: boolean; oldest_unpaid_approved_at: string | null };
 type Term = { id: string; kind: string; fee_bps: number; effective_from: string | null; effective_until: string | null; status: string };
 const pct = (bps: number) => `${(bps / 100).toLocaleString("en", { maximumFractionDigits: 2 })}%`;
 
@@ -21,6 +21,15 @@ export default async function Money({ searchParams }: { searchParams: Promise<Re
     isStore && status.is_admin ? sb.rpc("store_fee_terms", { p_store: org.id }) : Promise.resolve({ data: null }),
   ]);
   const terms = ((fee as any)?.terms ?? []) as Term[];
+  const isAdminStore = isStore && status.is_admin;
+  const invIds = ((invoices ?? []) as any[]).map((i) => i.id as string);
+  const [{ data: blocked }, linesArr, { data: disputes }] = await Promise.all([
+    isAdminStore ? sb.rpc("store_new_activity_blocked", { p_store: org.id }) : Promise.resolve({ data: false }),
+    Promise.all(invIds.map((id) => sb.rpc("invoice_lines", { p_invoice: id }).then((r) => [id, (r.data ?? []) as any[]] as const))),
+    invIds.length ? sb.from("invoice_disputes").select("*").in("invoice_id", invIds).order("created_at") : Promise.resolve({ data: [] as any[] }),
+  ]);
+  const lines = Object.fromEntries(linesArr);
+  const disputesBy = ((disputes ?? []) as any[]).reduce<Record<string, any[]>>((acc, x) => { (acc[x.invoice_id] ??= []).push(x); return acc; }, {});
   const now = Date.now();
   const d = (x: string | null) => (x ? shortDate(x, locale) : "");
   const balances = (bal ?? []) as Bal[];
@@ -43,13 +52,14 @@ export default async function Money({ searchParams }: { searchParams: Promise<Re
                 <span>{[x.effective_from && new Date(x.effective_from).getTime() > now ? m.feeFrom(d(x.effective_from)) : "", x.effective_until ? m.feeUntil(d(x.effective_until)) : ""].filter(Boolean).join(" · ")}</span>
               </div>
             ))}
+            {blocked === true && <p className="alert alert-warn small" style={{ margin: 0 }}>{t.lc.noAccept}</p>}
+            <p className="small" style={{ margin: 0 }}><a href="/legal/store-terms">{t.legal.title}</a></p>
             {terms.filter((x) => x.status === "proposed").map((x) => (
               <form key={x.id} action={respondFee} className="card card-flat stack" style={{ borderColor: "var(--warn, #c77700)" }}>
                 <input type="hidden" name="org" value={org.id} /><input type="hidden" name="term" value={x.id} />
-                <span>{m.feeProposed(pct(x.fee_bps), d(x.effective_from))}</span>
-                <span className="small muted">{m.feeDeclinedNote}</span>
-                <div className="row"><button className="btn btn-primary btn-sm" name="accept" value="1">{m.feeAccept}</button>
-                  <button className="btn btn-ghost btn-sm" name="accept" value="0">{m.feeDecline}</button></div>
+                <span>{t.lc.rate(pct((fee as any).current_bps ?? 0), pct(x.fee_bps), d(x.effective_from))}</span>
+                <div className="row" style={{ flexWrap: "wrap" }}><button className="btn btn-primary btn-sm" name="accept" value="1">{t.lc.rateAccept}</button>
+                  <button className="btn btn-ghost btn-sm" name="accept" value="0">{t.lc.rateDecline}</button></div>
               </form>
             ))}
           </div>
@@ -67,8 +77,8 @@ export default async function Money({ searchParams }: { searchParams: Promise<Re
                     <span className="badge badge-money">{m.approvedUnpaid}: {money(b.approved_unpaid_minor, b.currency, locale)}</span>
                     <span className="muted">{m.paid}: {money(b.paid_minor, b.currency, locale)}</span></span></div>
                 {b.due_at && (
-                  <div className="row small" style={{ marginTop: 6 }}>
-                    <span className="muted">{m.payCreatorBy(shortDate(b.due_at, locale))}</span>
+                  <div className="row small" style={{ marginTop: 6, flexWrap: "wrap" }}>
+                    {b.oldest_unpaid_approved_at && <span className="muted">{t.lc.approved(shortDate(b.oldest_unpaid_approved_at, locale))}</span>}
                     {b.overdue && <span className="badge badge-warn">{m.overdue}</span>}
                   </div>
                 )}
@@ -84,8 +94,8 @@ export default async function Money({ searchParams }: { searchParams: Promise<Re
             ))}
           </div>
         )}
-        <p className="small muted" style={{ marginTop: 8 }}>{m.approvedNote}</p>
-        <p className="small muted">{m.creatorTaxNote}</p>
+        <p className="small muted" style={{ marginTop: 8 }}>{t.lc.pending}</p>
+        <p className="small muted">{t.lc.tax}</p>
       </section>
 
       {(payouts ?? []).length > 0 && (
@@ -99,8 +109,9 @@ export default async function Money({ searchParams }: { searchParams: Promise<Re
                 <span className="amount">{money(p.amount_minor, p.currency, locale)}</span>
                 {p.creator_status === "awaiting" && !isStore && status.is_admin ? (
                   <form action={respondPayout} className="row"><input type="hidden" name="org" value={org.id} /><input type="hidden" name="id" value={p.id} />
-                    <button className="btn btn-primary btn-sm" name="confirm" value="1">{m.confirm}</button>
-                    <button className="btn btn-ghost btn-sm" name="confirm" value="0">{m.dispute}</button></form>
+                    <span className="small">{t.lc.reported}</span>
+                    <button className="btn btn-primary btn-sm" name="confirm" value="1">{t.lc.received}</button>
+                    <button className="btn btn-ghost btn-sm" name="confirm" value="0">{t.lc.notReceived}</button></form>
                 ) : <span className={`badge ${p.creator_status === "confirmed" ? "badge-money" : p.creator_status === "disputed" ? "badge-warn" : ""}`}>
                     {p.creator_status === "confirmed" ? m.confirmed : p.creator_status === "disputed" ? m.disputed : m.awaiting}</span>}
               </div>
@@ -121,6 +132,8 @@ export default async function Money({ searchParams }: { searchParams: Promise<Re
                       {i.status === "issued" && i.due_at && new Date(i.due_at).getTime() < now && <span className="badge badge-warn">{m.overdue}</span>}
                       <span className={`badge ${i.status === "paid" ? "badge-money" : "badge-warn"}`}>{m.status[i.status]}</span></span></div>
                   <table className="t small" style={{ marginTop: 8 }}><tbody>
+                    {(lines[i.id] ?? []).map((ln: any) => (
+                      <tr key={ln.rate_bps}><td>{m.base(pct(ln.rate_bps))}</td><td className="ltr">{money(ln.base_minor, i.currency, locale)}</td></tr>))}
                     <tr><td>{m.fees}</td><td className="ltr">{money(i.fees_minor, i.currency, locale)}</td></tr>
                     <tr><td>{m.vat(pct(Number(i.vat_bps)))}</td><td className="ltr">{money(i.vat_minor, i.currency, locale)}</td></tr>
                     {Number(i.credit_minor) > 0 && <>
@@ -131,11 +144,26 @@ export default async function Money({ searchParams }: { searchParams: Promise<Re
                   </tbody></table>
                   {i.status === "issued" && <p className="small muted" style={{ marginTop: 6 }}>{i.due_at ? m.dueBy(shortDate(i.due_at, locale)) : m.awaitingDelivery}</p>}
                   {Number(i.credit_minor) > 0 && <p className="small muted">{m.offsetDocNote}</p>}
+                  {(disputesBy[i.id] ?? []).map((x: any) => (
+                    <p key={x.id} className="small alert alert-warn" style={{ margin: "6px 0" }}>
+                      {m.disputeOpen(money(x.disputed_minor, i.currency, locale))} <b>{money(Number(i.total_minor) - Number(x.disputed_minor), i.currency, locale)}</b>
+                      {x.resolved_at ? <><br />{m.disputeResolved} {x.resolution}</> : null}</p>))}
+                  {i.status === "issued" && !(disputesBy[i.id] ?? []).some((x: any) => !x.resolved_at) && (
+                    <details style={{ marginTop: 6 }}><summary className="small">{m.disputeTitle}</summary>
+                      <form action={disputeInvoice} className="stack" style={{ marginTop: 8 }}>
+                        <input type="hidden" name="org" value={org.id} /><input type="hidden" name="invoice" value={i.id} />
+                        <p className="small muted" style={{ margin: 0 }}>{t.lc.dispute}</p>
+                        <label className="field"><span>{m.disputeAmount}</span><input name="amount" inputMode="decimal" required dir="ltr" /></label>
+                        <label className="field"><span>{m.disputeReason}</span><textarea name="reason" required minLength={3} maxLength={1000} /></label>
+                        <label className="field"><span>{m.disputeEvidence}</span><input name="evidence" maxLength={500} /></label>
+                        <button className="btn btn-ghost btn-sm">{m.disputeSend}</button>
+                      </form></details>)}
                 </div>
               ))}
             </div>
           )}
-          <p className="small muted" style={{ marginTop: 8 }}>{m.invoiceNote} {m.payHow}</p>
+          <p className="small muted" style={{ marginTop: 8 }}>{t.lc.request} {m.payHow}</p>
+          <p className="small"><a href="/legal/commissions">{t.legal.title}</a></p>
         </section>
       )}
     </AppShell>

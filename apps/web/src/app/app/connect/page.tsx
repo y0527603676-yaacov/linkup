@@ -23,7 +23,7 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
           </div>
         )}
         <ConnectForm orgId={org.id} l={t.connect} errors={t.errors} defaultSite={c?.site_url ?? o?.website_url ?? ""} rotate={c?.status === "connected"}
-          legal={(pend ?? []) as PendingDoc[]} locale={locale} legalLead={t.legal.agreeStore} />
+          legal={(pend ?? []) as PendingDoc[]} locale={locale} legalLead={t.lc.store} />
       </div>
     </AppShell>
   );

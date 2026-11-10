@@ -10,7 +10,10 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
   const { sb, org, isPlatformAdmin, t, locale } = ctx;
   if (!isPlatformAdmin) redirect(`/app?org=${org.id}`);
   const a = t.admin;
-  const [{ data }, { data: ai }] = await Promise.all([sb.rpc("admin_overview"), sb.rpc("admin_invoices")]);
+  const [{ data }, { data: ai }, { data: ld }, { data: cm }] = await Promise.all([sb.rpc("admin_overview"), sb.rpc("admin_invoices"),
+    sb.rpc("legal_admin_documents"), sb.rpc("admin_contact_messages")]);
+  const legalDocs = (ld ?? []) as any[];
+  const contacts = (cm ?? []) as any[];
   const d = data as Record<string, any>;
   const A = (ai ?? { invoices: [], tax_profiles: [], tax_approved: false }) as Record<string, any>;
   const pct = (bps: number) => `${(Number(bps) / 100).toLocaleString("en", { maximumFractionDigits: 2 })}%`;
@@ -81,6 +84,14 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
               </div>
               <div className="small muted">{i.delivered_at ? `${a.deliveredAt}: ${shortDate(i.delivered_at, locale)} (${i.delivery_method}) · ${a.dueAt}: ${shortDate(i.due_at, locale)}` : a.awaiting}{i.paid_reference ? ` · ${i.paid_reference}` : ""}</div>
               {(i.documents ?? []).length > 0 && <div className="small">{(i.documents as any[]).map((x, k) => <div key={k}>{a.issuers[x.issuer]} · {a.docTypes[x.type]} {x.number} · {x.date}</div>)}</div>}
+              {(i.lines ?? []).length > 0 && <div className="small muted ltr">{(i.lines as any[]).map((ln) => `${pct(ln.rate_bps)} × ${money(ln.base_minor, i.currency, locale)}`).join(" · ")}</div>}
+              {(i.disputes ?? []).map((x: any) => (
+                <div key={x.id} className="small alert alert-warn" style={{ margin: "6px 0" }}>
+                  {a.disputes}: {money(x.disputed_minor, i.currency, locale)} · {x.reason}{x.evidence ? ` · ${x.evidence}` : ""}
+                  {x.resolved_at ? <div>{t.money.disputeResolved} {x.resolution}</div> : (
+                    <form action={adminAction} className="row" style={{ marginTop: 6 }}>{hidden}<input type="hidden" name="op" value="resolve" /><input type="hidden" name="id" value={x.id} />
+                      <input name="resolution" required placeholder={a.resolution} style={{ flex: 1, minWidth: 140 }} /><button className="btn btn-ghost btn-sm">{a.resolve}</button></form>)}
+                </div>))}
               <div className="row small">{i.missing_linkup_doc && <span className="badge badge-warn">{a.missingLinkup}</span>}{i.missing_counterparty_doc && <span className="badge badge-warn">{a.missingCounter}</span>}</div>
               {i.status === "issued" && !i.delivered_at && (
                 <form action={adminAction} className="row" style={{ marginTop: 8 }}>{hidden}<input type="hidden" name="id" value={i.id} /><input type="hidden" name="op" value="delivered" />
@@ -104,6 +115,34 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
           ))}
         </div>
       </section>
+
+      {(A.wind_down ?? []).length > 0 && (
+        <section className="section"><H>{a.windDown}</H>
+          <div className="list">{(A.wind_down as any[]).map((w) => <div className="item" key={w.org_id}><span className="title">{w.org}</span></div>)}</div>
+        </section>
+      )}
+
+      <section className="section"><H>{t.legal.drafts}</H>
+        <p className="small muted">{t.legal.draftNote}</p>
+        <div className="list">{legalDocs.map((x) => (
+          <a className="item" key={x.id} href={`/legal/${x.doc_key}?lang=${x.locale}${x.status === "draft" ? `&draft=${x.version}` : ""}`}>
+            <div className="grow"><div className="title">{x.title}</div>
+              <div className="meta ltr">{x.doc_key} · {x.locale} · v{x.version}.0 · {x.audience} · {x.chars}</div></div>
+            <span className={`badge ${x.status === "published" ? "badge-money" : "badge-warn"}`}>{x.status === "published" ? t.common.saved : t.legal.draftBadge}</span></a>))}</div>
+      </section>
+
+      {contacts.length > 0 && (
+        <section className="section"><H>{a.contacts}</H>
+          <div className="list">{contacts.map((c) => (
+            <div className="item" key={c.id}>
+              <div className="grow"><div className="title">{c.name} · <span className="ltr">{c.email}</span> · {t.contact.topics[c.topic]}</div>
+                <div className="meta" style={{ whiteSpace: "pre-wrap" }}>{c.message}</div><div className="meta">{shortDate(c.created_at, locale)}</div></div>
+              {c.handled_at ? <span className="badge">{a.handled}</span> : (
+                <form action={adminAction}>{hidden}<input type="hidden" name="op" value="contact" /><input type="hidden" name="id" value={c.id} />
+                  <button className="btn btn-ghost btn-sm">{a.handled}</button></form>)}
+            </div>))}</div>
+        </section>
+      )}
 
       <section className="section"><H>{a.taxProfiles}</H>
         <div className="list">{(A.tax_profiles ?? []).map((p: any) => (
@@ -136,6 +175,7 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
                 <span className="small muted" style={{ width: "100%" }}>{a.transferDoc}</span>
                 <select name="doc_type" style={{ width: "auto" }}>{docTypes.map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
                 <input name="doc_number" required placeholder={a.docNumber} style={{ width: 100 }} /><input type="date" name="doc_date" required style={{ width: "auto" }} />
+                <input name="withholding" inputMode="decimal" placeholder={a.withholding} style={{ width: 170 }} />
                 <input name="reference" placeholder={t.money.reference} style={{ width: 110 }} />
                 <button className="btn btn-ghost btn-sm" name="op" value="transfer">{a.transfer}</button></form></div>))}</div>
         </section>

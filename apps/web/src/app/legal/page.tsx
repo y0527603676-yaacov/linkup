@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { PublicPage } from "@/components/Site";
 import { getT } from "@/i18n";
-import { latestDocs } from "@/lib/legal";
+import { latestDocs, OPERATOR } from "@/lib/legal";
 import { shortDate } from "@/lib/format";
 
 export const metadata: Metadata = { title: "Legal" };
@@ -21,9 +21,16 @@ export default async function LegalCenter() {
             {docs.map((d) => (
               <Link className="item" key={d.doc_key} href={`/legal/${d.doc_key}`}>
                 <div className="grow"><div className="title">{d.title}</div>
-                  <div className="meta">{l.version(d.version, shortDate(d.effective_from ?? d.published_at ?? new Date().toISOString(), locale))}</div></div>
+                  <div className="meta">{l.ver(d.version)} · {l.effective(shortDate(d.effective_from ?? d.published_at ?? new Date().toISOString(), locale))}</div></div>
               </Link>
             ))}
+          </div>
+        )}
+        {docs.length > 0 && (
+          <div className="card card-flat stack small" style={{ marginTop: 24 }}>
+            <b>{l.operator}</b>
+            <p dir="ltr" style={{ margin: 0, overflowWrap: "anywhere" }}>{OPERATOR}</p>
+            <p style={{ margin: 0 }}>{t.lc.privacy} <Link href="/contact">{l.contact}</Link></p>
           </div>
         )}
       </section>

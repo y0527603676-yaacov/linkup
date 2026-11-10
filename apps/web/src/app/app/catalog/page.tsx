@@ -64,6 +64,7 @@ export default async function Catalog({ searchParams }: { searchParams: Promise<
                       : st === "pending" ? <span className="badge badge-warn">{c.pending}</span>
                       : st === "rejected" ? null
                       : <form action={joinOpportunity}><input type="hidden" name="org" value={org.id} /><input type="hidden" name="id" value={o.id} />
+                          <label className="row small" style={{ alignItems: "flex-start", gap: 6, marginBottom: 6 }}><input type="checkbox" name="collab" value="1" required style={{ width: "auto", marginTop: 3 }} /><span>{t.lc.collab} <a href="/legal/commissions" target="_blank" rel="noopener">{t.legal.title}</a></span></label>
                           <button className="btn btn-primary btn-sm btn-block">{o.auto_approve ? c.join : c.request}</button></form>}
                   </div>
                 </div>

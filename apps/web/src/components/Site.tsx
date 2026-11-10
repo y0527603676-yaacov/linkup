@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { getT } from "@/i18n";
+import { getSupabase } from "@/lib/supabase/server";
 import { getUser } from "@/lib/supabase/server";
 
 export function Logo({ href = "/" }: { href?: string }) {
@@ -28,6 +29,9 @@ export async function SiteHeader({ path = "/" }: { path?: string }) {
 
 export async function SiteFooter() {
   const { t } = await getT();
+  // The cookies notice points to the published policy; it is shown only once that policy is published.
+  const { data: ck } = await (await getSupabase()).from("legal_documents").select("id").eq("doc_key", "cookies").eq("status", "published").limit(1);
+  const cookiesPublished = (ck ?? []).length > 0;
   return (
     <footer className="site-footer">
       <div className="container row between">
@@ -39,8 +43,10 @@ export async function SiteFooter() {
           <Link href="/terms">{t.common.terms}</Link>
           <Link href="/privacy">{t.common.privacy}</Link>
           <Link href="/legal">{t.legal.footer}</Link>
+          <Link href="/contact">{t.legal.contact}</Link>
         </span>
       </div>
+      {cookiesPublished && <p className="container small muted" style={{ marginTop: 8 }}><Link href="/legal/cookies">{t.lc.cookies}</Link></p>}
     </footer>
   );
 }

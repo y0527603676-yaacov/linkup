@@ -22,6 +22,7 @@ export default async function Rewards({ searchParams }: { searchParams: Promise<
     <AppShell ctx={ctx} active="rewards" path="/app/rewards">
       <PageHead title={r.title} lead={r.lead} />
       {!w.program_open && <p className="alert alert-warn">{r.closed}</p>}
+      <p className="small muted">{t.lc.referral} <a href="/legal/founding-partners">{t.legal.title}</a></p>
       {act && (
         <div className="fp stack">
           <h2 style={{ letterSpacing: 0, margin: 0 }}>{r.link}</h2>

@@ -250,7 +250,7 @@ export const he = {
     approvedNote: "עמלה מאושרת אחרי שההזמנה הושלמה ועברו 14 יום (חלון ההחזרות). התשלום למשפיען: עד 14 יום מאישור העמלה.",
     feeTitle: "עמלת LINKUP שלכם", feeNow: (p: string) => `${p} בתוספת מע״מ כדין`, feeFrom: (d: string) => `מ-${d}`, feeUntil: (d: string) => `עד ${d}`,
     feeProposed: (p: string, d: string) => `הצעה לשינוי תעריף: ${p} בתוספת מע״מ כדין, החל מ-${d}. התעריף ישתנה רק אם תאשרו.`,
-    feeAccept: "אישור השינוי", feeDecline: "דחייה", feeDeclinedNote: "אם לא תאשרו, התעריף הנוכחי ממשיך לחול.",
+    feeAccept: "אישור השינוי", base: (p: string) => `בסיס החיוב (${p})`, disputeTitle: "דיווח על אי-התאמה", disputeAmount: "סכום במחלוקת (₪)", disputeReason: "פירוט", disputeEvidence: "אסמכתא (לא חובה)", disputeSend: "שליחת הדיווח", disputeOpen: (a: string) => `דווחה אי-התאמה על ${a}. היתרה שאינה במחלוקת:`, disputeResolved: "טופל:", windDown: "פעילות חדשה מושהית: התעריף החדש לא אושר.", feeDecline: "דחייה", feeDeclinedNote: "אם לא תאשרו, התעריף הנוכחי ממשיך לחול.",
     feeKinds: { founders: "מחיר מייסדים", standard: "תעריף רגיל", custom: "הסכם פרטני" } as Record<string, string>,
   },
   rewards: {
@@ -277,7 +277,7 @@ export const he = {
     kinds: {
       first_sale: "🎉 מכירה ראשונה!", sale: "מכירה חדשה", campaign_launched: "קמפיין חדש", partner_joined: "שותף חדש הצטרף",
       application_received: "בקשת הצטרפות חדשה", application_approved: "הבקשה אושרה", application_rejected: "הבקשה נדחתה",
-      invoice_issued: "הופקה דרישת תשלום", invoice_delivered: "התקבלה דרישת תשלום מ-LINKUP", fee_change_notice: "הודעה על שינוי בתעריף LINKUP", payout_marked: "חנות סימנה תשלום אליך", payout_confirmed: "השותף אישר קבלת תשלום",
+      invoice_issued: "הופקה דרישת תשלום", invoice_delivered: "התקבלה דרישת תשלום מ-LINKUP", fee_change_notice: "הודעה על שינוי בתעריף LINKUP", dispute_resolved: "המחלוקת על דרישת התשלום טופלה", payout_marked: "חנות סימנה תשלום אליך", payout_confirmed: "השותף אישר קבלת תשלום",
       payout_disputed: "השותף דיווח שהתשלום לא תואם", referral_joined: "מישהו הצטרף דרכך", first_reward: "התגמול הראשון שלך ב-Founding Partners",
       reward_paid: "תגמול הועבר",
     } as Record<string, string>,
@@ -300,7 +300,7 @@ export const he = {
     docNumber: "מספר מסמך", docDate: "תאריך", amount: "סכום לפני מע״מ", vat: "מע״מ", missingLinkup: "חסר מסמך של LINKUP", missingCounter: "חסר מסמך נגדי על התגמול",
     taxProfiles: "פרטי עסק לאימות", verify: "אימות", zeroRate: "אישור מע״מ 0%", previewTitle: "תצוגה מקדימה: לא נוצר דבר", offsetBlocked: "אין קיזוז: סוג העוסק לא אומת",
     pricing: "תעריפים", rateChange: "שינוי תעריף רגיל (הודעה של 30 יום, העלאה רק באישור החנות)", individual: "הסכם פרטני לחנות", pct: "אחוז", from: "מתאריך", until: "עד (לא חובה)", note: "תיעוד", store: "חנות",
-    transferDoc: "מסמך המפנה (חובה לפני העברה)",
+    transferDoc: "מסמך המפנה (חובה לפני העברה)", withholding: "ניכוי במקור ₪ (לפי אישור תקף בלבד)", disputes: "מחלוקות", resolve: "סימון כטופל", resolution: "החלטה / תיעוד", windDown: "חנויות בסיום פעילות (תעריף לא אושר)", contacts: "פניות", handled: "טופל",
     void: "ביטול", transfer: "סימון העברה", settings: "הגדרות", orgs: "פעילויות אחרונות", suspected: "חשד להזמנה עצמית", blocked: "הפניות שנחסמו",
     events: {
       signup: "הרשמות", activity_added: "פעילות נוספת", store_connected: "חנויות שחוברו", products_synced: "מוצרים סונכרנו",
@@ -320,12 +320,35 @@ export const he = {
     expired: "תוקף ההצעה פג.", handled: "ההצעה הזו כבר טופלה.", accept: "אישור ההצעה", acceptAs: (n: string) => `אישור כ${n}`,
     orNew: "או פעילות חדשה בשם", yourName: "השם שלך (כפי שיופיע לחנות)", storeName: "שם החנות", storeSite: "אתר החנות",
   },
+  lc: {
+    reg: "קראתי ואני מסכים/ה לתנאי השימוש הכלליים ולתנאים החלים על תפקידי. קראתי את מדיניות הפרטיות.",
+    store: "עמלת LINKUP היא 2% + מע\"מ כדין לשישה חודשים ממפתח החיבור הראשון; לאחר מכן התעריף הרגיל, המתחיל ב-3% + מע\"מ כדין ועשוי להתעדכן לעתיד בהודעה ובאישור. בסיס החישוב לאחר הנחות, ללא מע\"מ מכירה ומשלוח. אני מאשר/ת את התנאים המסחריים לחנויות ואת מדיניות העמלות, התשלומים וההתחשבנות.",
+    collab: "אני מאשר/ת את שיעור עמלת המשפיען, כללי הייחוס ותנאי הקמפיין המוצגים.",
+    rate: (o: string, n: string, d: string) => `התעריף הרגיל שלך ישתנה מ-${o} ל-${n} בתוספת מע"מ החל מ-${d}, לפחות 30 יום ממועד ההודעה. השינוי חל רק על מכירות עתידיות. ניתן לאשר או להפסיק פעילות עתידית ללא פגיעה בזכויות קודמות.`,
+    rateAccept: "אני מאשר/ת את התעריף החדש", rateDecline: "לא מאשר/ת - ניהול סיום פעילות",
+    noAccept: "לא התקבל אישור לתעריף החדש. לא תחויב/י בו. פעילות חדשה עשויה להיעצר; עסקאות וזכויות קיימות ימשיכו להיות מטופלות.",
+    request: "דרישת תשלום פנימית, לא חשבונית מס. לתשלום בתוך 14 יום מקבלתה. פירוט: בסיס, עמלה, מע\"מ, קיזוזים ויתרה.",
+    dispute: "ניתן לדווח על אי-התאמה ולצרף אסמכתאות. סכומים שאינם שנויים במחלוקת ישולמו במועדם.",
+    pending: "עמלת המשפיען נבחנת לאחר השלמת ההזמנה וחלוף 14 יום, בכפוף לבדיקות והחזרים.",
+    approved: (d: string) => `העמלה אושרה בתאריך ${d}. החנות תשלם ישירות בתוך 14 ימים ממועד זה. LINKUP אינה מחזיקה את הכסף.`,
+    reported: "החנות דיווחה על העברה. האם קיבלת את הכסף?", received: "קיבלתי", notReceived: "לא התקבל או לא תואם",
+    referral: "תגמול FOUNDING PARTNERS מחושב מעמלת LINKUP שנגבתה בפועל ללא מע\"מ; מע\"מ על שירות ההפניה, ככל שחל, מטופל בנפרד. תשלום כפוף לאימות זכאות ומסמכי מס.",
+    cookies: "אנו משתמשים בטכנולוגיות תפעול וייחוס. למידע נוסף: מדיניות עוגיות וייחוס מכירות.",
+    privacy: "לעיון, תיקון או מחיקה לפי הדין ניתן לפנות דרך טופס יצירת קשר או y0527603676@gmail.com.",
+    tax: "תשלומי המשפיען מתבצעים ישירות מהחנות. הצדדים אחראים למסמכי מס, ניכוי במקור ודיווח ככל שנדרש בדין. מסמכי LINKUP הרשמיים מופקים מחוץ למערכת.",
+  },
+  contact: {
+    title: "יצירת קשר", lead: "פניות כלליות, שאלות חיוב, מחלוקות ובקשות פרטיות (עיון, תיקון או מחיקה לפי הדין). נחזור אליך בדוא\"ל.",
+    name: "שם", email: "דוא\"ל", topic: "נושא", message: "הודעה", send: "שליחה", sent: "הפנייה התקבלה. נחזור אליך בהקדם.",
+    topics: { general: "כללי", billing: "חיוב ודרישות תשלום", dispute: "מחלוקת", privacy: "פרטיות (עיון, תיקון, מחיקה)", legal: "מסמכים משפטיים" } as Record<string, string>,
+    note: "בקשות פרטיות מטופלות ידנית, לאחר אימות זהות מידתי ובמועדים הקבועים בדין.",
+  },
   legal: {
     title: "מסמכים משפטיים", lead: "כל המסמכים החלים על השימוש ב-LINKUP.", none: "המסמכים המשפטיים בעריכה ויפורסמו לפני פתיחת ההרשמה.",
     version: (v: number, d: string) => `גרסה ${v} · בתוקף מ-${d}`, back: "לכל המסמכים",
     agree: "קראתי ואני מסכים/ה ל:", agreeStore: "אני מאשר/ת בשם החנות את:", required: "יש לאשר את המסמכים כדי להמשיך.",
     acceptTitle: "עדכון מסמכים", acceptLead: "פרסמנו מסמכים שחלים על השימוש שלך ב-LINKUP. כדי להמשיך יש לקרוא ולאשר.", acceptCta: "אישור והמשך",
-    updated: "עודכן", footer: "מסמכים משפטיים",
+    updated: "עודכן", footer: "מסמכים משפטיים", operator: "פרטי המפעיל", otherDocs: "מסמכים נוספים", otherLang: "English", drafts: "מסמכים משפטיים (טיוטות לבדיקה)", draftBadge: "טיוטה - לא פורסם", preview: "תצוגה", draftNote: "הטיוטות נטענו מקובץ המקור כלשונן. פרסום רק לאחר אישור עורך דין ורואה חשבון.", ver: (v: number) => `גרסה ${v}.0`, effective: (d: string) => `בתוקף מ-${d}`, contact: "יצירת קשר",
   },
   errors: {
     forbidden: "אין לך הרשאה לפעולה הזו.", not_authenticated: "צריך להתחבר כדי להמשיך.", invalid_url: "כתובת האתר לא תקינה. לדוגמה: myshop.co.il",
@@ -341,7 +364,7 @@ export const he = {
     store_not_connected: "צריך חנות מחוברת.", nothing_to_pay: "אין עמלות מאושרות שטרם שולמו.", already_responded: "כבר הגבת על התשלום הזה.",
     invalid_status: "סטטוס לא תקין.", below_minimum: "היתרה מתחת למינימום להעברה.", invoice_not_payable: "דרישת התשלום כבר טופלה.",
     period_not_closed: "החודש עוד לא הסתיים.", invalid_period: "תקופה לא תקינה.",
-    setting_locked: "הגדרה זו משתנה רק בהחלטה מפורשת.", join_standing_first: "החנות מאשרת שותפים חדשים ידנית. בקשו להצטרף להצעה הקבועה שלה קודם.", invalid_setting: "ערך לא תקין.", signups_closed: "ההרשמה ל-LINKUP תיפתח בקרוב. משתמשים קיימים יכולים להיכנס כרגיל.", legal_acceptance_required: "יש לאשר את המסמכים המשפטיים כדי להמשיך.", invoicing_not_approved: "הפקת דרישות תשלום חסומה עד אישור חישוב המס.", invoice_not_deliverable: "אי אפשר לתעד מסירה לדרישה הזו.", notice_too_short: "שינוי תעריף דורש הודעה של 30 יום לפחות.", note_required: "יש לתעד את ההסכם.", invalid_method: "אופן מסירה לא תקין.", tax_profile_required: "נדרשים פרטי עסק מאומתים.", document_required: "יש לרשום את מסמך המפנה לפני ההעברה.", zero_rate_not_allowed: "מע״מ 0% אפשרי רק לתושב חוץ מאומת עם אסמכתאות.", invoice_not_voidable: "אי אפשר לבטל דרישת תשלום שנמסרה. תיקון יבוצע בתקופה הבאה.", unknown: "משהו השתבש. נסו שוב.",
+    setting_locked: "הגדרה זו משתנה רק בהחלטה מפורשת.", join_standing_first: "החנות מאשרת שותפים חדשים ידנית. בקשו להצטרף להצעה הקבועה שלה קודם.", invalid_setting: "ערך לא תקין.", signups_closed: "ההרשמה ל-LINKUP תיפתח בקרוב. משתמשים קיימים יכולים להיכנס כרגיל.", legal_acceptance_required: "יש לאשר את המסמכים המשפטיים כדי להמשיך.", invoicing_not_approved: "הפקת דרישות תשלום חסומה עד אישור חישוב המס.", invoice_not_deliverable: "אי אפשר לתעד מסירה לדרישה הזו.", notice_too_short: "שינוי תעריף דורש הודעה של 30 יום לפחות.", note_required: "יש לתעד את ההסכם.", invalid_method: "אופן מסירה לא תקין.", store_rate_not_accepted: "לא ניתן לפתוח פעילות חדשה עם החנות: התעריף החדש לא אושר. פעילות קיימת ממשיכה.", invoice_not_disputable: "אפשר לדווח רק על דרישה פתוחה.", dispute_open: "כבר קיים דיווח פתוח על דרישה זו.", invalid_amount: "סכום לא תקין.", too_many: "נשלחו יותר מדי פניות. נסו שוב מאוחר יותר.", invalid_input: "יש לבדוק את הפרטים שהוזנו.", tax_profile_required: "נדרשים פרטי עסק מאומתים.", document_required: "יש לרשום את מסמך המפנה לפני ההעברה.", zero_rate_not_allowed: "מע״מ 0% אפשרי רק לתושב חוץ מאומת עם אסמכתאות.", invoice_not_voidable: "אי אפשר לבטל דרישת תשלום שנמסרה. תיקון יבוצע בתקופה הבאה.", unknown: "משהו השתבש. נסו שוב.",
   } as Record<string, string>,
 };
 export type Dict = typeof he;

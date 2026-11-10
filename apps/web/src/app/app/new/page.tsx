@@ -17,8 +17,9 @@ export default async function NewActivity({ searchParams }: { searchParams: Prom
   const sb = await getSupabase();
   let refName: string | null = null;
   if (ref) { const { data } = await sb.rpc("referrer_name", { p_code: ref }); refName = (data as string) ?? null; }
-  const { data: pend } = await sb.rpc("legal_pending", { p_context: "signup" });
-  const pending = (pend ?? []) as PendingDoc[];
+  const ctxs = type === "creator" ? ["signup", "creator"] : ["signup"];
+  const lists = await Promise.all(ctxs.map((c) => sb.rpc("legal_pending", { p_context: c })));
+  const pending = lists.flatMap((r) => (r.data ?? []) as PendingDoc[]);
   return (
     <div className="auth-wrap">
       <div className="card stack">
@@ -42,7 +43,7 @@ export default async function NewActivity({ searchParams }: { searchParams: Prom
               <label className="field"><span>{o.website}</span>
                 <input name="website" dir="ltr" inputMode="url" placeholder="myshop.co.il" /></label>
             )}
-            <LegalChecks docs={pending} locale={locale} lead={t.legal.agree} />
+            <LegalChecks docs={pending} locale={locale} label={t.lc.reg} />
             <button className="btn btn-primary btn-block">{o.create}</button>
           </form>
         ) : null}

@@ -37,7 +37,7 @@ export function ConnectForm({ orgId, l, errors, defaultSite, rotate, legal, loca
       {state.error && <p className="alert alert-error">{errors[state.error] ?? errors.unknown}</p>}
       <label className="field"><span>{l.site}</span>
         <input name="site" required dir="ltr" inputMode="url" placeholder="myshop.co.il" defaultValue={defaultSite} /></label>
-      <LegalChecks docs={legal} locale={locale} lead={legalLead} />
+      <LegalChecks docs={legal} locale={locale} label={legalLead} />
       <button className={rotate ? "btn btn-ghost" : "btn btn-primary"} disabled={pending}>{pending ? "…" : rotate ? l.rotate : l.create}</button>
     </form>
   );

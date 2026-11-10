@@ -7,6 +7,7 @@ import { getMyOrgs } from "@/lib/orgs";
 import { getSupabase } from "@/lib/supabase/server";
 import { errorText, pct } from "@/lib/format";
 import { acceptOffer } from "@/app/app/actions";
+import { LegalChecks, type PendingDoc } from "@/components/LegalChecks";
 
 type Offer = {
   direction: "store_to_creator" | "creator_to_store"; from_name: string; invitee_name: string | null; target_site_url: string | null;
@@ -27,6 +28,8 @@ export default async function OfferPage({ params, searchParams }: { params: Prom
   const { data: auth } = await sb.auth.getUser();
   const needType = offer.direction === "store_to_creator" ? "creator" : "store";
   const myOrgs = auth.user ? (await getMyOrgs()).filter((o) => o.type === needType && (o.role === "owner" || o.role === "admin")) : [];
+  const pendingNew = auth.user ? (await Promise.all((needType === "creator" ? ["signup", "creator"] : ["signup"])
+    .map((c) => sb.rpc("legal_pending", { p_context: c })))).flatMap((r) => (r.data ?? []) as PendingDoc[]) : [];
   const open = offer.status === "sent" || offer.status === "opened";
   const toCreator = offer.direction === "store_to_creator";
   const rate = pct(offer.commission_bps, locale);
@@ -46,7 +49,8 @@ export default async function OfferPage({ params, searchParams }: { params: Prom
           : (
             <div className="stack">
               {myOrgs.map((o) => (
-                <form key={o.id} action={acceptOffer}><input type="hidden" name="token" value={token} /><input type="hidden" name="org" value={o.id} />
+                <form key={o.id} action={acceptOffer} className="stack"><input type="hidden" name="token" value={token} /><input type="hidden" name="org" value={o.id} />
+                  {toCreator && <label className="row small" style={{ alignItems: "flex-start", gap: 6 }}><input type="checkbox" name="collab" value="1" required style={{ width: "auto", marginTop: 3 }} /><span>{t.lc.collab}</span></label>}
                   <button className="btn btn-primary btn-block">{p.acceptAs(o.name)}</button></form>
               ))}
               <form action={acceptOffer} className="card stack">
@@ -56,6 +60,8 @@ export default async function OfferPage({ params, searchParams }: { params: Prom
                 {!toCreator && !myOrgs.length && (
                   <label className="field"><span>{p.storeSite}</span><input name="website" dir="ltr" inputMode="url" defaultValue={offer.target_site_url ?? ""} placeholder="myshop.co.il" /></label>
                 )}
+                <LegalChecks docs={pendingNew} locale={locale} label={t.lc.reg} />
+                {toCreator && <label className="row small" style={{ alignItems: "flex-start", gap: 6 }}><input type="checkbox" name="collab" value="1" required style={{ width: "auto", marginTop: 3 }} /><span>{t.lc.collab}</span></label>}
                 <button className={myOrgs.length ? "btn btn-ghost" : "btn btn-primary"}>{p.accept}</button>
               </form>
             </div>

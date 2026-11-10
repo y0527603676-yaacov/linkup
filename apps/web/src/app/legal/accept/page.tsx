@@ -30,7 +30,16 @@ export default async function AcceptLegal({ searchParams }: { searchParams: Prom
         <Alert text={errorText(sp.error, t)} />
         <input type="hidden" name="next" value={next} />
         <input type="hidden" name="ctx" value={ctxs.join(",")} />
-        <LegalChecks docs={docs} locale={locale} lead={l.agree} />
+        <LegalChecks docs={docs.filter((d) => d.audience !== "store")} locale={locale} label={t.lc.reg} />
+        {docs.some((d) => d.audience === "store") && (
+          <div className="stack">
+            {docs.filter((d) => d.audience === "store").map((d) => <input key={d.doc_key} type="hidden" name="legal_store" value={d.doc_key} />)}
+            <ul className="small" style={{ margin: 0, paddingInlineStart: 18 }}>
+              {docs.filter((d) => d.audience === "store").map((d) => <li key={d.doc_key}><a href={`/legal/${d.doc_key}`} target="_blank" rel="noopener">{(locale === "he" ? d.title_he ?? d.title_en : d.title_en ?? d.title_he) ?? d.doc_key}</a></li>)}
+            </ul>
+            <label className="row small" style={{ alignItems: "flex-start", gap: 8 }}><input type="checkbox" name="agree_store" value="1" required style={{ width: "auto", marginTop: 4 }} /><span>{t.lc.store}</span></label>
+          </div>
+        )}
         <button className="btn btn-primary btn-block">{l.acceptCta}</button>
       </form>
     </div>
