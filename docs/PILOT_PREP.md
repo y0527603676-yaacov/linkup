@@ -108,3 +108,7 @@ Each store keeps its own payment provider. There is no split at sale time, and L
 ## Morning
 
 See `docs/MORNING_CONNECTION.md`. The adapter is implemented on the documented API; it is not connected.
+
+## Unknown charge results and provider comparison
+
+See `docs/BILLING_PROVIDER_COMPARISON.md`. No second charge while a result is unknown. Webhooks are applied idempotently. Creator VAT shows "pending tax review" (never 0 / exempt) until the classification is verified.

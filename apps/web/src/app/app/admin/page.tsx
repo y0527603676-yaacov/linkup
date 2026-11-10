@@ -86,6 +86,15 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
                 <div className="meta">{x.detail ?? ""}{x.since ? ` · ${shortDate(x.since, locale)}` : ""}</div></div>
               {x.action === "retry" && <form action={adminAction}>{hidden}<input type="hidden" name="op" value="retry" /><input type="hidden" name="id" value={x.ref} />
                 <button className="btn btn-ghost btn-sm">{bl.retry}</button></form>}
+              {x.action === "resolve" && x.kind === "charge_unknown" && (
+                <form action={adminAction} className="stack" style={{ minWidth: 220 }}>{hidden}<input type="hidden" name="id" value={x.ref} />
+                  <p className="small muted" style={{ margin: 0 }}>{bl.unknownHelp}</p>
+                  <input name="ref" placeholder={bl.providerRef} /><input name="note" required placeholder={bl.resolveNote} />
+                  <span className="row" style={{ gap: 6 }}><ChoiceButton className="btn btn-ghost btn-sm" name="op" value="resolve_paid">{bl.resolvePaid}</ChoiceButton>
+                    <ChoiceButton className="btn btn-ghost btn-sm" name="op" value="resolve_failed">{bl.resolveFailed}</ChoiceButton></span></form>)}
+              {x.action === "alert" && (
+                <form action={adminAction} className="row" style={{ flexWrap: "wrap", gap: 6 }}>{hidden}<input type="hidden" name="op" value="alert" /><input type="hidden" name="id" value={x.ref} />
+                  <input name="note" required placeholder={bl.alertNote} style={{ minWidth: 160 }} /><button className="btn btn-ghost btn-sm">{bl.alertHandled}</button></form>)}
             </div>))}</div>
         )}
       </section>

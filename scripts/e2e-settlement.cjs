@@ -40,7 +40,7 @@ const OWNER = 'a0000000-0000-0000-0000-000000000001', CREATOR = 'a0000000-0000-0
   ok(sql(`select method||'|'||bank_code from creator_payout_details where org_id='${creator}'`) === 'bank_transfer|12', 'creator payment details saved');
   await c.screenshot({ path: `${SHOTS}/st-creator-money-he.png`, fullPage: true });
   ok(await noOverflow(c), 'creator money page: no overflow');
-  ok(cm.includes('עמלת בסיס מוסכמת') && cm.includes('ניכוי מס במקור') && cm.includes('לא נקבע'), 'breakdown: base, withholding; VAT not determined for an unverified creator');
+  ok(cm.includes('עמלת בסיס מוסכמת') && cm.includes('ניכוי מס במקור') && cm.includes('ממתין לבירור מס') && cm.includes('זה לא פטור ממע״מ'), 'breakdown: base, withholding; VAT not determined for an unverified creator');
 
   // 2. Store: pay page — details shown, nothing recorded by viewing or copying
   const s = await as(OWNER, 'owner@flow.test');
@@ -54,7 +54,7 @@ const OWNER = 'a0000000-0000-0000-0000-000000000001', CREATOR = 'a0000000-0000-0
   await s.screenshot({ path: `${SHOTS}/st-pay-he.png`, fullPage: true });
   // partial payment + proof
   fs.writeFileSync('/tmp/claude-proof.pdf', '%PDF-1.4 local proof');
-  ok(pc.includes('לא יירשם מע״מ') && pc.includes('LINKUP לא מחשבת ניכוי במקור'), 'pay page: no VAT without a verified classification; withholding is entered, not computed');
+  ok(pc.includes('ממתין לבירור מס') && pc.includes('LINKUP לא מחשבת ניכוי במקור'), 'pay page: no VAT without a verified classification; withholding is entered, not computed');
   await s.fill('input[name=amount]', '10'); await s.fill('input[name=reference]', 'TR-77'); await s.fill('input[name=withholding]', '0.5');
   await s.setInputFiles('input[name=proof]', '/tmp/claude-proof.pdf');
   await submit(s, 'button:has-text("דיווח על התשלום")');
@@ -108,6 +108,12 @@ const OWNER = 'a0000000-0000-0000-0000-000000000001', CREATOR = 'a0000000-0000-0
   ok(r1.scheduled === 1 && r1.charged === 1 && r1.documents === 1, `worker scheduled, charged and recorded the tax document (${JSON.stringify(r1)})`);
   ok(sql(`select status from invoices where id='${inv}'`) === 'paid', 'payment request paid automatically');
   ok((await s.request.post(`${B}/api/billing/run`)).status() === 403, 'worker endpoint refuses calls without the secret');
+  // a late / repeated provider webhook for the request already paid changes nothing
+  const hook = (id) => s.request.post(`${B}/api/billing/webhook/simulated`, { headers: { 'x-sim-signature': 'valid', 'content-type': 'application/json' },
+    data: JSON.stringify({ id, kind: 'payment', payload: {}, apply: { invoiceId: inv, outcome: 'succeeded', providerRef: 'late' } }) }).then((r) => r.json());
+  const h1 = await hook('wh-1'), h2 = await hook('wh-1');
+  ok(h1.applied === 'duplicate' && h2.status === 'duplicate' && h2.applied === 'duplicate', 'late and repeated webhooks: stored once, no second payment');
+  ok(sql(`select count(*) from billing_charges where invoice_id='${inv}' and status='succeeded'`) === '1', 'one successful charge for the request');
 
   // 6. Owner: finance dashboard and exceptions
   await go(s, `/app/admin?org=${store}`);

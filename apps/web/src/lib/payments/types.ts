@@ -6,7 +6,9 @@ export type ChargeRequest = { chargeId: string; invoiceId: string; amountMinor: 
   /** The payment request being paid: the fee and its VAT are documented in full; an offset needs separate documents. */
   invoice?: { feeMinor: number; vatMinor: number; offsetMinor: number } };
 /** `document`: some providers (Morning) issue the tax invoice-receipt in the same call as the charge. */
-export type ChargeResult = { ok: true; providerRef: string; document?: IssuedDocument } | { ok: false; providerRef?: string; code: string; message: string };
+export type ChargeResult = { ok: true; providerRef: string; document?: IssuedDocument } | { ok: false; providerRef?: string; code: string; message: string;
+      /** true = the result is NOT known (timeout, 5xx, lost response). Never retried; resolved by status query, webhook or the owner. */
+      unknown?: boolean };
 export type RefundRequest = { refundId: string; providerRef: string; amountMinor: number; currency: string };
 export type RefundResult = { ok: true; providerRef: string } | { ok: false; message: string };
 
@@ -21,7 +23,9 @@ export interface PaymentProvider {
    *  through (e.g. the response was lost). Prevents a double charge. Optional. */
   findCharge?(invoiceId: string): Promise<{ providerRef: string; document?: IssuedDocument } | null>;
   /** Verifies a webhook's signature and normalises it. Returns null when the signature is not valid. */
-  parseWebhook(headers: Headers, rawBody: string): Promise<{ eventId: string; kind: string; payload: Record<string, unknown> } | null>;
+  parseWebhook(headers: Headers, rawBody: string): Promise<{ eventId: string; kind: string; payload: Record<string, unknown>;
+    /** When the event says how a LINKUP payment request's charge ended. */
+    apply?: { invoiceId: string; outcome: "succeeded" | "failed"; providerRef: string | null } } | null>;
 }
 
 export type IssuedDocument = { docType: "tax_invoice_receipt" | "credit_note"; number: string; issuedOn: string; amountMinor: number; vatMinor: number;

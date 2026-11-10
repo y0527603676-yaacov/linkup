@@ -296,6 +296,9 @@ export async function adminAction(form: FormData) {
     : op === "contact" ? await sb.rpc("mark_contact_handled", { p_id: str(form, "id") })
     : op === "vatbasis" ? await sb.rpc("set_commission_vat_basis", { p_agreement: str(form, "id"), p_note: str(form, "note") })
     : op === "retry" ? await sb.rpc("retry_charge_now", { p_invoice: str(form, "id") })
+    : op === "resolve_paid" || op === "resolve_failed" ? await sb.rpc("admin_resolve_charge", { p_charge: str(form, "id"),
+        p_outcome: op === "resolve_paid" ? "succeeded" : "failed", p_provider_ref: str(form, "ref") || null, p_note: str(form, "note") })
+    : op === "alert" ? await sb.rpc("handle_billing_alert", { p_alert: str(form, "id"), p_note: str(form, "note") })
     : op === "refund" ? await sb.rpc("request_refund", { p_charge: str(form, "id"), p_amount_minor: pctToBps(str(form, "amount"), -1), p_reason: str(form, "reason") })
     : op === "notice" ? await sb.rpc("record_fee_notice", { p_term: str(form, "term"), p_event: str(form, "event"), p_channel: str(form, "channel"),
         p_recipient: str(form, "recipient") || null, p_reference: str(form, "reference") || null, p_occurred_at: str(form, "at") ? new Date(str(form, "at")).toISOString() : null })

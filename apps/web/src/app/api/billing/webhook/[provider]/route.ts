@@ -15,5 +15,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
   const sb = createClient(url, key, { auth: { persistSession: false } });
   const { data, error } = await sb.rpc("billing_record_webhook", { p_provider: name, p_event_id: ev.eventId, p_kind: ev.kind, p_payload: ev.payload });
   if (error) return NextResponse.json({ error: "store_failed" }, { status: 500 });
-  return NextResponse.json({ ok: true, status: data });
+  // Applied every time (also for duplicates): applying is idempotent — one payment request is paid by one charge.
+  let applied: unknown = null;
+  if (ev.apply) {
+    const { data: a, error: ae } = await sb.rpc("billing_apply_provider_event", { p_provider: name, p_event_id: ev.eventId,
+      p_invoice: ev.apply.invoiceId, p_outcome: ev.apply.outcome, p_provider_ref: ev.apply.providerRef });
+    if (ae) return NextResponse.json({ error: "apply_failed" }, { status: 500 });   // provider retries the delivery
+    applied = a;
+  }
+  return NextResponse.json({ ok: true, status: data, applied });
 }

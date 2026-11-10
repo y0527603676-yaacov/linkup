@@ -8,7 +8,7 @@ export type PairBal = { other_org_id: string; other_name: string; currency: stri
   outstanding_minor: number; balance_minor: number; reported_minor: number; confirmed_minor: number; due_at: string | null; overdue: boolean; due_soon: boolean;
   awaiting_confirmation: number; vat_basis: string; vat_reason: string; vat_bps: number | null; outstanding_vat_minor: number | null;
   outstanding_gross_minor: number | null; reported_vat_minor: number; withheld_minor: number; transferred_minor: number };
-export type Payout = { id: string; store_org_id: string; creator_org_id: string; amount_minor: number; vat_minor: number; withholding_minor: number; net_minor: number; currency: string; method: string;
+export type Payout = { id: string; store_org_id: string; creator_org_id: string; amount_minor: number; vat_minor: number; withholding_minor: number; net_minor: number; tax_basis: string | null; currency: string; method: string;
   reference: string | null; paid_on: string | null; paid_at: string; creator_status: string; withdrawn_at: string | null; dispute_reason: string | null;
   store_response: string | null; withdraw_note: string | null };
 
@@ -76,7 +76,7 @@ export function Settlement({ t, locale, orgId, isStore, isAdmin, balances, payou
             {payouts.map((x) => (
               <div className="card card-flat small" key={x.id}>
                 <div className="row between" style={{ flexWrap: "wrap", gap: 8 }}>
-                  <b>{names[isStore ? x.creator_org_id : x.store_org_id] ?? "—"} · {p.tx.paymentLine(m(x.amount_minor, x.currency), m(x.vat_minor, x.currency), m(x.withholding_minor ?? 0, x.currency), m(x.net_minor ?? x.amount_minor, x.currency))}</b>
+                  <b>{names[isStore ? x.creator_org_id : x.store_org_id] ?? "—"} · {p.tx.paymentLine(m(x.amount_minor, x.currency), x.tax_basis === "undetermined" ? p.tx.undetermined : m(x.vat_minor, x.currency), m(x.withholding_minor ?? 0, x.currency), m(x.net_minor ?? x.amount_minor, x.currency))}</b>
                   <span className={`badge ${status(x) === "confirmed" ? "badge-money" : status(x) === "awaiting" ? "" : "badge-warn"}`}>{p.statuses[status(x)]}</span>
                 </div>
                 <div className="muted">{shortDate(x.paid_on ?? x.paid_at, locale)} · {t.money.methods[x.method] ?? x.method}{x.reference ? ` · ${x.reference}` : ""}</div>

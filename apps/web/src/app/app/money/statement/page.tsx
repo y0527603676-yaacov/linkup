@@ -53,7 +53,7 @@ export default async function Statement({ searchParams }: { searchParams: Promis
       {(s.payments as any[]).length === 0 ? <p className="muted">—</p> : (
         <div className="table-wrap"><table className="t small"><thead><tr><th>{p.date}</th><th>{p.tx.base}</th><th>{p.tx.vat}</th><th>{p.tx.withholding}</th><th>{p.tx.transferred}</th><th>{t.money.method}</th><th>{t.money.reference}</th><th>{p.state}</th></tr></thead><tbody>
           {(s.payments as any[]).map((x) => (
-            <tr key={x.id}><td>{shortDate(x.paid_on ?? x.reported_at, locale)}</td><td className="ltr">{m(x.amount_minor)}</td><td className="ltr">{m(x.vat_minor)}</td>
+            <tr key={x.id}><td>{shortDate(x.paid_on ?? x.reported_at, locale)}</td><td className="ltr">{m(x.amount_minor)}</td><td className="ltr">{x.tax_basis === "undetermined" ? p.tx.undetermined : m(x.vat_minor)}</td>
               <td className="ltr">{m(x.withholding_minor ?? 0)}{x.withholding_ref ? ` · ${x.withholding_ref}` : ""}</td><td className="ltr">{m(x.net_minor ?? x.amount_minor)}</td>
               <td>{t.money.methods[x.method] ?? x.method}</td><td className="ltr">{x.reference ?? ""}{(x.proofs ?? []).map((pr: any) => <> · <a key={pr.id} href={`/app/money/proof/${pr.id}?org=${org.id}`}>{pr.filename}</a></>)}</td>
               <td>{p.statuses[x.status] ?? x.status}</td></tr>))}

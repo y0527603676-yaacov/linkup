@@ -63,6 +63,12 @@ describe("charge a saved card", () => {
     const m = mock({ ...token, "/charge": () => ({ status: 400, json: { errorCode: 2417, errorMessage: "declined" } }) });
     expect(await morningPayments(env, m.f).charge(req())).toMatchObject({ ok: false, code: "morning_2417" });
   });
+  it("a 5xx or an unreadable answer is 'unknown', never a decline", async () => {
+    const m5 = mock({ ...token, "/charge": () => ({ status: 502, json: {} }) });
+    expect(await morningPayments(env, m5.f).charge(req())).toMatchObject({ ok: false, unknown: true });
+    const m0 = mock({ ...token, "/charge": () => ({ status: 200, json: {} }) });
+    expect(await morningPayments(env, m0.f).charge(req())).toMatchObject({ ok: false, unknown: true });
+  });
   it("a different VAT rate: charged, but the document is not recorded automatically", async () => {
     const m = mock({ ...token, "/charge": () => ({ json: { id: "doc-2", number: 1, vatRate: 0.17, transactionId: "tx-8" } }) });
     expect(await morningPayments(env, m.f).charge(req())).toEqual({ ok: true, providerRef: "tx-8" });
@@ -95,11 +101,11 @@ describe("no double charge", () => {
         idempotency_key: "ch1:2", provider: "morning", token_ref: "tok-9" }];
       if (fn === "billing_complete_charge") return { result: "paid" };
       if (fn === "billing_invoice_summary") return { fees_minor: 10_000, vat_minor: 1_800, total_minor: 11_800, credit_minor: 0, currency: "ILS", store_org_id: "s" };
-      if (fn === "billing_claim_refunds") return [];
+      if (fn === "billing_claim_refunds" || fn === "billing_unknown_open") return [];
       return 0;
     }) as any;
     const r = await runBilling(rpc, morningPayments(env, m.f), { ...simulatedDocuments(), name: "morning" });
-    expect(r).toMatchObject({ charged: 1, documents: 1, errors: [] });
+    expect(r).toMatchObject({ charged: 1, documents: 1, errors: [] });   // attempt 2 found attempt 1 at Morning
     expect(calls.find(([f]) => f === "billing_complete_charge")![1]).toMatchObject({ p_success: true, p_provider_ref: "doc-1" });
     expect(calls.find(([f]) => f === "billing_record_document")![1]).toMatchObject({ p_number: "50012", p_amount_minor: 10_000, p_vat_minor: 1_800 });
     expect(m.calls.some((c) => c.url.endsWith("/charge"))).toBe(false);
@@ -113,10 +119,16 @@ describe("webhooks", () => {
     new Headers({ ...(sig ? { "x-webhook-signature": sig } : {}), "x-webhook-delivery-id": "dl-1", "x-webhook-topic": "document/created", ...extra });
   it("accepts only a valid HMAC-SHA256 of the raw body", async () => {
     const pay = morningPayments(env, mock(token).f);
-    expect(await pay.parseWebhook(h(sign("whsec")), body)).toEqual({ eventId: "dl-1", kind: "document/created", payload: { id: "doc-1", type: 320, number: 50012 } });
+    expect(await pay.parseWebhook(h(sign("whsec")), body)).toMatchObject({ eventId: "dl-1", kind: "document/created", payload: { id: "doc-1", type: 320, number: 50012 } });
     expect(await pay.parseWebhook(h(sign("wrong")), body)).toBeNull();
     expect(await pay.parseWebhook(h(null), body)).toBeNull();
     expect(await pay.parseWebhook(h(sign("whsec")), body.replace("50012", "50013"))).toBeNull();
+  });
+  it("a LINKUP tax invoice-receipt is applied to its payment request", async () => {
+    const b2 = JSON.stringify({ id: "doc-9", type: 320, description: "LINKUP-inv-1", transactions: [{ id: "tx-9" }] });
+    const ev = await morningPayments(env, mock(token).f).parseWebhook(new Headers({ "x-webhook-signature": createHmac("sha256", "whsec").update(b2).digest("hex"),
+      "x-webhook-delivery-id": "dl-9", "x-webhook-topic": "document/created" }), b2);
+    expect(ev!.apply).toEqual({ invoiceId: "inv-1", outcome: "succeeded", providerRef: "tx-9" });
   });
   it("without a configured secret nothing is accepted", async () => {
     expect(await morningPayments({ ...env, webhookSecret: undefined }, mock(token).f).parseWebhook(h(sign("whsec")), body)).toBeNull();

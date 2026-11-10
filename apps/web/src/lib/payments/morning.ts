@@ -89,16 +89,20 @@ export function morningPayments(env: Env = morningEnv(), f: Fetch = fetch): Paym
         income: [{ description: "עמלת שירות LINKUP", quantity: 1, price: major(feeMinor), currency: "ILS", vatType: vatMinor === 0 ? 2 : 0 }],
         remarks: `LINKUP payment request ${req.invoiceId}`,
       });
-      if (r.status >= 300 || !r.json.id) {
+      // 5xx or an unreadable answer: Morning may have charged → unknown, never a decline.
+      if (r.status >= 500 || (r.status < 300 && !r.json.id)) {
+        return { ok: false, code: `morning_${r.status}`, message: "no definite answer from Morning", unknown: true };
+      }
+      if (r.status >= 300) {
         return { ok: false, code: `morning_${r.json.errorCode ?? r.status}`, message: String(r.json.errorMessage ?? "charge failed").slice(0, 200) };
       }
       // The document must carry the VAT LINKUP calculated. On a different rate the money is still charged (paid), but the
       // document is not recorded automatically → it appears in the exceptions queue as "tax document missing".
       if (typeof r.json.vatRate === "number") {
         const rate = r.json.vatRate > 1 ? r.json.vatRate / 100 : r.json.vatRate;   // documented as a fraction (0–1)
-        if (Math.abs(Math.round(feeMinor * rate) - vatMinor) > 1) return { ok: true, providerRef: r.json.transactionId ?? r.json.id };
+        if (Math.abs(Math.round(feeMinor * rate) - vatMinor) > 1) return { ok: true, providerRef: String(r.json.transactionId ?? r.json.id) };
       }
-      return { ok: true, providerRef: r.json.transactionId ?? r.json.id, document: toDoc(r.json as { id: string; number: number }, feeMinor, vatMinor) };
+      return { ok: true, providerRef: String(r.json.transactionId ?? r.json.id), document: toDoc(r.json as { id: string; number: number }, feeMinor, vatMinor) };
     },
     async findCharge(invoiceId) {
       const ref = chargeRef(invoiceId);
@@ -119,7 +123,12 @@ export function morningPayments(env: Env = morningEnv(), f: Fetch = fetch): Paym
       const id = headers.get("x-webhook-delivery-id");
       const topic = headers.get("x-webhook-topic");
       if (!id || !topic) return null;
-      return { eventId: id, kind: topic, payload: JSON.parse(rawBody) as Record<string, unknown> };
+      const payload = JSON.parse(rawBody) as Record<string, any>;
+      // A tax invoice-receipt carrying a LINKUP request reference = that request's charge went through.
+      const ref = typeof payload.description === "string" && payload.description.startsWith("LINKUP-") ? payload.description.slice(7) : null;
+      const apply = topic === "document/created" && Number(payload.type) === 320 && ref
+        ? { invoiceId: ref, outcome: "succeeded" as const, providerRef: String(payload.transactions?.[0]?.id ?? payload.id ?? "") || null } : undefined;
+      return { eventId: id, kind: topic, payload, apply };
     },
   };
 }
