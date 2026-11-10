@@ -8,11 +8,18 @@ function add_action($h, $cb, $p = 10) { $GLOBALS['hooks'][$h][] = $cb; }
 function add_filter($h, $cb, $p = 10) { $GLOBALS['hooks'][$h][] = $cb; }
 function do_hook($h, ...$a) { foreach ($GLOBALS['hooks'][$h] ?? [] as $cb) $cb(...$a); }
 function register_deactivation_hook($f, $cb) {}
+function register_rest_route($ns, $route, $args) { $GLOBALS['routes']["$ns$route"] = $args; }
+function current_user_can($cap) { return ($GLOBALS['caps'] ?? []) && in_array($cap, $GLOBALS['caps'], true); }
+class WP_Error { function __construct(public $code = '', public $message = '', public $data = []) {} }
+class WP_REST_Request { function __construct(private $p = []) {} function get_param($k) { return $this->p[$k] ?? null; } }
 function get_option($k, $d = false) { return $GLOBALS['opts'][$k] ?? $d; }
 function update_option($k, $v, $a = null) { $GLOBALS['opts'][$k] = $v; return true; }
 function delete_option($k) { unset($GLOBALS['opts'][$k]); }
 function wp_json_encode($v) { return json_encode($v, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); }
-function wp_remote_post($url, $args) { $GLOBALS['sent'][] = ['url' => $url, 'args' => $args]; return ['code' => $GLOBALS['http_code'], 'body' => '{"ok":true}']; }
+function wp_remote_post($url, $args) { $GLOBALS['sent'][] = ['url' => $url, 'args' => $args]; return ['code' => $GLOBALS['http_code'], 'body' => '{"ok":true,"result":{"coupons":[]}}']; }
+if (!defined('DAY_IN_SECONDS')) define('DAY_IN_SECONDS', 86400);
+function wc_get_orders($a) { return []; }
+function linkup_send_order_now_stub() {}
 function wp_remote_retrieve_response_code($r) { return $r['code']; }
 function wp_remote_retrieve_body($r) { return $r['body']; }
 function is_wp_error($r) { return false; }
@@ -78,6 +85,19 @@ $n = count($GLOBALS['sent']); linkup_products_full_pass_step(); $ok(count($GLOBA
 // 4. no credentials → nothing sent
 $GLOBALS['sent'] = []; $GLOBALS['opts']['linkup_connection_key'] = ''; do_hook('woocommerce_update_product', 2); do_hook('shutdown');
 $ok(count($GLOBALS['sent']) === 0, 'disconnected store sends nothing');
+// 5. remote setup routes (one-approval onboarding)
+do_hook('rest_api_init');
+$r = $GLOBALS['routes'];
+$ok(isset($r['linkup/v1/connect'], $r['linkup/v1/status']) && $r['linkup/v1/connect']['methods'] === 'POST', 'REST routes registered');
+$GLOBALS['caps'] = ['read']; $ok(call_user_func($r['linkup/v1/connect']['permission_callback']) === false, 'a non-manager cannot call the setup route');
+$GLOBALS['caps'] = ['manage_woocommerce']; $ok(call_user_func($r['linkup/v1/connect']['permission_callback']) === true, 'a WooCommerce manager can');
+$bad = linkup_rest_connect(new WP_REST_Request(['key' => 'lk_nope'])); $ok($bad instanceof WP_Error && $bad->data['status'] === 400, 'malformed key rejected, nothing saved');
+$GLOBALS['sent'] = []; $GLOBALS['http_code'] = 200;
+$res = linkup_rest_connect(new WP_REST_Request(['key' => 'lk_' . str_repeat('c', 32) . '_' . str_repeat('d', 64)]));
+$ok($res['connected'] === true && get_option('linkup_connection_key') === 'lk_' . str_repeat('c', 32) . '_' . str_repeat('d', 64), 'valid key saved and connection started');
+$ok(!array_key_exists('key', $res) && strpos(json_encode($res), str_repeat('d', 64)) === false, 'the secret is never returned');
+$ok(linkup_rest_status()['version'] === '0.4.0', 'status reports the plugin version');
+$GLOBALS['opts']['linkup_connection_key'] = '';
 // export a realistic batch for the DB test
 $batch = []; foreach ([1, 2, 3, 10, 11, 12, 4, 5] as $id) { $batch[] = linkup_product_payload(wc_get_product($id)); }
 file_put_contents(sys_get_temp_dir() . '/linkup-products.json', wp_json_encode($batch));

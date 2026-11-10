@@ -23,7 +23,7 @@ export default async function Stores() {
           <Link className="btn btn-primary" href={cta}>{s.cta}</Link>
           <a className="btn btn-ghost" href="#how">{t.common.learnMore}</a>
         </div>
-        <p className="note">{s.note}</p>
+        <ul className="benefits">{s.benefits.map((b) => <li key={b}>{b}</li>)}</ul>
       </section>
       <section className="band alt" id="how">
         <div className="container">

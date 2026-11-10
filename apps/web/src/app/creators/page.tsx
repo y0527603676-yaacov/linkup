@@ -29,7 +29,7 @@ export default async function Creators() {
           <Link className="btn btn-primary" href={cta}>{c.cta}</Link>
           <a className="btn btn-ghost" href="#how">{t.common.learnMore}</a>
         </div>
-        <p className="note">{c.note}</p>
+        <ul className="benefits">{c.benefits.map((b) => <li key={b}>{b}</li>)}</ul>
       </section>
       <section className="band alt">
         <div className="container">

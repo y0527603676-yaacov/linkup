@@ -12,7 +12,9 @@ export default async function Home() {
         <p className="eyebrow">{h.eyebrow}</p>
         <h1>{h.title}</h1>
         <p className="lead">{h.lead}</p>
-        <div className="split" style={{ marginTop: 28 }}>
+        <ul className="benefits" aria-label={h.eyebrow}>{h.benefits.map((b) => <li key={b}>{b}</li>)}</ul>
+        <p className="choose">{h.choose}</p>
+        <div className="split choices">
           <Link href="/stores" className="choice store">
             <span className="ic" aria-hidden>🛍️</span>
             <h2>{h.storeCard.title}</h2>

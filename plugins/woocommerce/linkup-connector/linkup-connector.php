@@ -2,16 +2,20 @@
 /**
  * Plugin Name: LINKUP Connector
  * Description: מחבר את חנות ה-WooCommerce ל-LINKUP — קופונים לשותפים, מעקב הפניות ודיווח מכירות מאובטח.
- * Version: 0.3.1
+ * Version: 0.4.0
  * Requires at least: 6.4
  * Requires PHP: 7.4
  * WC requires at least: 8.0
+ * Requires Plugins: woocommerce
+ * Author: LINKUP
+ * License: GPLv2 or later
+ * License URI: https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain: linkup-connector
  */
 
 defined('ABSPATH') || exit;
 
-define('LINKUP_VERSION', '0.3.1');
+define('LINKUP_VERSION', '0.4.0');
 define('LINKUP_ENDPOINT', 'https://ycuvcpslvkgndytubycn.supabase.co/functions/v1/woo');
 define('LINKUP_OPT_KEY', 'linkup_connection_key');
 define('LINKUP_OPT_LAST', 'linkup_last_sync');
@@ -437,6 +441,40 @@ function linkup_settings_page() {
     </div>
     <?php
 }
+
+/* ------------------------------------------------------------------
+ * 6. Remote setup for "one approval" onboarding (no manual install, no key copying).
+ *    LINKUP authenticates as the approving store manager (WordPress application password, revoked by LINKUP
+ *    right after setup), installs this plugin from WordPress.org, then calls these routes to save the key.
+ *    Only users who can manage WooCommerce may call them; the key itself is never returned.
+ * ------------------------------------------------------------------ */
+function linkup_rest_can_manage() {
+    return current_user_can('manage_woocommerce');
+}
+
+function linkup_rest_status() {
+    $last = get_option(LINKUP_OPT_LAST, array());
+    return array('version' => LINKUP_VERSION, 'connected' => (bool) linkup_credentials(),
+                 'last_ok' => !empty($last['ok']), 'last_at' => isset($last['at']) ? (int) $last['at'] : null);
+}
+
+function linkup_rest_connect($request) {
+    $key = trim((string) $request->get_param('key'));
+    if (!preg_match('/^lk_[0-9a-f]{32}_[0-9a-f]{64}$/', $key)) {
+        return new WP_Error('linkup_invalid_key', 'Invalid connection key', array('status' => 400));
+    }
+    update_option(LINKUP_OPT_KEY, $key, false);
+    $synced = linkup_sync();
+    return array_merge(linkup_rest_status(), array('synced' => (bool) $synced));
+}
+
+add_action('rest_api_init', static function () {
+    register_rest_route('linkup/v1', '/status', array(
+        'methods' => 'GET', 'callback' => 'linkup_rest_status', 'permission_callback' => 'linkup_rest_can_manage'));
+    register_rest_route('linkup/v1', '/connect', array(
+        'methods' => 'POST', 'callback' => 'linkup_rest_connect', 'permission_callback' => 'linkup_rest_can_manage',
+        'args' => array('key' => array('required' => true, 'type' => 'string'))));
+});
 
 register_deactivation_hook(__FILE__, static function () {
     if (function_exists('as_unschedule_all_actions')) {
