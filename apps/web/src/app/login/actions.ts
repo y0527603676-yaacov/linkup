@@ -27,3 +27,14 @@ export async function sendLink(form: FormData) {
   }
   redirect(`/login?${sentQs}${resend ? "&resent=1" : ""}`);
 }
+
+/** 6-digit code from the same e-mail (works in any app or browser, including an installed iPhone app). */
+export async function verifyCode(form: FormData) {
+  const email = String(form.get("email") ?? "").trim().toLowerCase();
+  const token = String(form.get("code") ?? "").replace(/\s/g, "");
+  const next = safeNext(form.get("next"));
+  const sb = await getSupabase();
+  const { error } = await sb.auth.verifyOtp({ email, token, type: "email" });
+  if (error) redirect(`/login?sent=1&email=${encodeURIComponent(email)}&error=bad_code&next=${encodeURIComponent(next)}`);
+  redirect(next);
+}

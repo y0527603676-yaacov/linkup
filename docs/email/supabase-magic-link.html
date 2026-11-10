@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<body style="margin:0;padding:0;background:#f7f7f4;font-family:Arial,Helvetica,sans-serif;color:#24103f;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f7f7f4;padding:24px 12px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#ffffff;border-radius:16px;padding:28px 24px;text-align:right;">
+        <tr><td style="padding-bottom:20px;">
+          <img src="https://linkup-tawny.vercel.app/brand/linkup-logo.png" width="160" height="41" alt="LINKUP" style="display:block;border:0;font-size:22px;font-weight:bold;color:#3b0a8f;">
+        </td></tr>
+        <tr><td style="font-size:20px;font-weight:bold;padding-bottom:10px;">כניסה ל-LINKUP</td></tr>
+        <tr><td style="font-size:15px;line-height:1.6;color:#4a4560;padding-bottom:20px;">לחצו על הכפתור כדי להיכנס. אין צורך בסיסמה.</td></tr>
+        <tr><td style="padding-bottom:22px;">
+          <a href="{{ .RedirectTo }}&token_hash={{ .TokenHash }}&type=email" style="display:inline-block;background:#5b3df5;color:#ffffff;text-decoration:none;font-weight:bold;font-size:16px;padding:14px 26px;border-radius:999px;">כניסה ל-LINKUP</a>
+        </td></tr>
+        <tr><td style="font-size:14px;line-height:1.6;color:#4a4560;padding-bottom:6px;">פותחים מתוך האפליקציה שבמסך הבית? אפשר גם להקליד את הקוד:</td></tr>
+        <tr><td style="font-size:28px;letter-spacing:6px;font-weight:bold;direction:ltr;text-align:right;padding-bottom:22px;">{{ .Token }}</td></tr>
+        <tr><td style="font-size:12px;line-height:1.6;color:#8a86a0;border-top:1px solid #eeeaf5;padding-top:14px;">הקישור והקוד תקפים לזמן קצר ולשימוש אחד. אם לא ביקשתם להיכנס, אפשר להתעלם מההודעה.<br>LINKUP · חנויות ומשפיענים צומחים יחד</td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>

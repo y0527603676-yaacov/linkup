@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import { getT } from "@/i18n";
+import { getOrigin } from "@/lib/supabase/server";
 import "@fontsource/rubik/hebrew-400.css";
 import "@fontsource/rubik/hebrew-500.css";
 import "@fontsource/rubik/hebrew-600.css";
@@ -20,7 +21,18 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title: { default: t.meta.title, template: "%s · LINKUP" },
     description: t.meta.description,
-    openGraph: { title: t.meta.title, description: t.meta.description, siteName: "LINKUP", locale: locale === "he" ? "he_IL" : "en_US", type: "website" },
+    applicationName: "LINKUP",
+    appleWebApp: { capable: true, title: "LINKUP", statusBarStyle: "default" },
+    metadataBase: new URL(await getOrigin()),
+    icons: {
+      icon: [{ url: "/icons/favicon-32.png", sizes: "32x32", type: "image/png" }, { url: "/icons/favicon-48.png", sizes: "48x48", type: "image/png" }, { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }],
+      apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180" }],
+    },
+    openGraph: {
+      title: t.meta.title, description: t.meta.description, siteName: "LINKUP", locale: locale === "he" ? "he_IL" : "en_US", type: "website",
+      images: [{ url: "/brand/og-image.jpg", width: 1200, height: 630, alt: "LINKUP" }],
+    },
+    twitter: { card: "summary_large_image", title: t.meta.title, description: t.meta.description, images: ["/brand/og-image.jpg"] },
   };
 }
 

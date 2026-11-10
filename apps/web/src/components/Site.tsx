@@ -5,7 +5,14 @@ import { getSupabase } from "@/lib/supabase/server";
 import { getUser } from "@/lib/supabase/server";
 
 export function Logo({ href = "/" }: { href?: string }) {
-  return <Link href={href} className="logo" aria-label="LINKUP"><i aria-hidden /> <span>LINKUP</span></Link>;
+  // Original LINKUP logo, as two crops of the same artwork (symbol + wordmark) so small spaces can show the symbol alone
+  // and dark mode can show the wordmark in white. Proportions and spacing follow the source file exactly.
+  return (
+    <Link href={href} className="logo" aria-label="LINKUP">
+      <img className="logo-sym" src="/brand/linkup-symbol.webp" alt="" width={242} height={192} decoding="async" />
+      <img className="logo-word" src="/brand/linkup-wordmark.webp" alt="" width={477} height={108} decoding="async" />
+    </Link>
+  );
 }
 
 export async function SiteHeader({ path = "/" }: { path?: string }) {
@@ -35,7 +42,7 @@ export async function SiteFooter() {
   return (
     <footer className="site-footer">
       <div className="container row between">
-        <span>© {new Date().getFullYear()} {t.common.rights}</span>
+        <span className="row" style={{ gap: 10 }}><Logo />© {new Date().getFullYear()} {t.common.rights}</span>
         <span className="row">
           <Link href="/stores">{t.common.stores}</Link>
           <Link href="/creators">{t.common.creators}</Link>

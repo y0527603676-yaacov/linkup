@@ -1,5 +1,6 @@
 import "server-only";
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { getSupabase } from "./supabase/server";
 import { getT } from "@/i18n";
 
@@ -39,7 +40,8 @@ export type OrgStatus = {
 export async function loadApp(sp: Record<string, string | string[] | undefined>, need?: "store" | "creator") {
   const orgs = await getMyOrgs();
   if (!orgs.length) redirect("/app/new");
-  const org = pickOrg(orgs, sp.org)!;
+  // ?org= wins; otherwise the activity opened last (cookie set by the middleware), otherwise the first one.
+  const org = pickOrg(orgs, sp.org ?? (await cookies()).get("lk_org")?.value)!;
   if (need && org.type !== need) redirect(`/app?org=${org.id}`);
   const sb = await getSupabase();
   // Status, admin flag and both possible legal contexts in one parallel round trip.

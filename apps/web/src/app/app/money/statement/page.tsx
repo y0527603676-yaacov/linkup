@@ -1,3 +1,4 @@
+import { Logo } from "@/components/Site";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { loadApp } from "@/lib/orgs";
@@ -23,6 +24,7 @@ export default async function Statement({ searchParams }: { searchParams: Promis
     <main className="container statement" dir={dir} style={{ padding: "24px 16px 64px", maxWidth: 820 }}>
       <p className="row between no-print"><Link href={`/app/money?org=${org.id}`}>← {t.money.title}</Link>
         <span className="row" style={{ gap: 8 }}><PrintButton label={p.print} /><a className="btn btn-ghost btn-sm" href={`/app/money/csv?org=${org.id}&with=${sp.with}`}>{p.csv}</a></span></p>
+      <div className="statement-brand"><Logo href={`/app?org=${org.id}`} /></div>
       <h1>{isRequest ? p.requestTitle : p.statementTitle}</h1>
       <p className="alert alert-warn small">{p.notTax}</p>
       <table className="t small"><tbody>

@@ -128,11 +128,17 @@ export const en: Dict = {
     invitedBy: (n: string) => `${n} invited you to LINKUP`,
     choose: "How would you like to join?",
   },
+  install: {
+    text: "Add LINKUP to your home screen and open your dashboard in one tap.",
+    install: "Add to home screen", later: "Not now",
+    iosSteps: "Tap the Share button (square with an up arrow), then \"Add to Home Screen\".",
+  },
   login: {
     title: "Log in to LINKUP",
     lead: "We'll email you a sign-in link. Click it to log in — no password needed.",
     email: "Email", send: "Send sign-in link", sentTitle: "Check your email",
     sentText: (e: string) => `We sent a sign-in link to ${e}. Open the email and click the link to continue.`,
+    sentTextCode: (e: string) => `We sent a sign-in link and a code to ${e}. Click the link, or type the code from the email here.`, code: "Code from the email", verify: "Log in",
     spam: "Not there after a few minutes? Check your spam or promotions folder.", resend: "Resend the link", resent: "A new link is on its way.", other: "Different email",
   },
   onboarding: {
@@ -414,7 +420,7 @@ export const en: Dict = {
     proposal_expired: "This offer has expired. Ask the sender for a new one.", wrong_org_type: "This offer is meant for a different activity type.",
     rate_limited: "You've reached today's limit. Try again tomorrow.", not_found: "Not found.", too_many_orgs: "You've reached the maximum number of activities.",
     unsupported_org_type: "Unsupported activity type.", not_a_store: "Available for stores only.", not_a_creator: "Available for creators only.",
-    bad_code: "This sign-in link is invalid or has expired. Request a new one.", email: "That email isn't valid.", send_failed: "We couldn't send an email right now. Try again in a minute.",
+    bad_code: "This sign-in link is invalid or has expired. Request a new one.", link_other_browser: "The link opened in a different browser from the one that requested it. Request a new link here and open it on the same device and browser.", email: "That email isn't valid.", send_failed: "We couldn't send an email right now. Try again in a minute.",
     invalid_email: "That email isn't valid.", invalid_role: "Invalid role.", last_owner: "At least one owner must remain.",
     invite_invalid: "This invite is no longer valid.", invite_email_mismatch: "This invite was sent to a different email. Log in with the invited email.",
     opportunity_closed: "This opportunity is no longer open.", self_deal: "You can't join an offer from your own activity.", already_decided: "Already handled.",

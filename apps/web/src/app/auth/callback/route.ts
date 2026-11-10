@@ -9,9 +9,15 @@ export async function GET(req: NextRequest) {
   const next = safeNext(p.get("next"));
   const sb = await getSupabase();
   let ok = false;
+  let reason = "bad_code";
   const code = p.get("code");
   const tokenHash = p.get("token_hash");
-  if (code) ok = !(await sb.auth.exchangeCodeForSession(code)).error;
+  if (code) {
+    const { error } = await sb.auth.exchangeCodeForSession(code);
+    ok = !error;
+    // The default link only works in the browser that asked for it; say so instead of "invalid link".
+    if (error && /verifier/i.test(`${(error as { code?: string }).code ?? ""} ${error.message}`)) reason = "link_other_browser";
+  }
   else if (tokenHash) ok = !(await sb.auth.verifyOtp({ token_hash: tokenHash, type: (p.get("type") ?? "email") as EmailOtpType })).error;
   const dest = req.nextUrl.clone();
   dest.search = "";
@@ -21,7 +27,7 @@ export async function GET(req: NextRequest) {
     dest.search = query ? `?${query}` : "";
   } else {
     dest.pathname = "/login";
-    dest.search = `?error=bad_code&next=${encodeURIComponent(next)}`;
+    dest.search = `?error=${reason}&next=${encodeURIComponent(next)}`;
   }
   return NextResponse.redirect(dest);
 }
