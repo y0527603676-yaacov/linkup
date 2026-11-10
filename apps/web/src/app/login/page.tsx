@@ -3,7 +3,7 @@ import { Logo } from "@/components/Site";
 import { Alert } from "@/components/AppShell";
 import { getT } from "@/i18n";
 import { errorText, safeNext } from "@/lib/format";
-import { sendLink, verifyCode } from "./actions";
+import { sendLink } from "./actions";
 
 export default async function Login({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const sp = await searchParams;
@@ -19,11 +19,11 @@ export default async function Login({ searchParams }: { searchParams: Promise<Re
             <h1>{l.sentTitle}</h1>
             <p className="muted">{l.sentText(sp.email)}</p>
             <Alert text={errorText(sp.error, t)} />
-            <form action={verifyCode} className="stack">
-              <input type="hidden" name="email" value={sp.email} /><input type="hidden" name="next" value={next} />
-              <label className="field"><span>{l.code}</span>
-                <input name="code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6,10}" required dir="ltr" autoFocus /></label>
-              <button className="btn btn-primary btn-block">{l.verify}</button>
+            {sp.resent && !sp.error && <p className="badge badge-brand">{l.resent}</p>}
+            <p className="small muted">{l.spam}</p>
+            <form action={sendLink} className="stack">
+              <input type="hidden" name="email" value={sp.email} /><input type="hidden" name="next" value={next} /><input type="hidden" name="resend" value="1" />
+              <button className="btn btn-ghost btn-block">{l.resend}</button>
             </form>
             <Link className="small center" href={`/login?next=${encodeURIComponent(next)}`}>{l.other}</Link>
           </>

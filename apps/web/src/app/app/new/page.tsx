@@ -17,6 +17,7 @@ export default async function NewActivity({ searchParams }: { searchParams: Prom
   const sb = await getSupabase();
   let refName: string | null = null;
   if (ref) { const { data } = await sb.rpc("referrer_name", { p_code: ref }); refName = (data as string) ?? null; }
+  const { count: orgCount } = await sb.from("memberships").select("org_id", { count: "exact", head: true });
   const ctxs = type === "creator" ? ["signup", "creator"] : ["signup"];
   const lists = await Promise.all(ctxs.map((c) => sb.rpc("legal_pending", { p_context: c })));
   const pending = lists.flatMap((r) => (r.data ?? []) as PendingDoc[]);
@@ -24,7 +25,7 @@ export default async function NewActivity({ searchParams }: { searchParams: Prom
     <div className="auth-wrap">
       <div className="card stack">
         <Logo href="/app" />
-        <h1>{o.title}</h1>
+        <h1>{orgCount ? o.titleAdd : o.title}</h1>
         <p className="muted">{o.lead}</p>
         {refName && <p className="badge badge-brand">{o.invitedBy(refName)}</p>}
         <Alert text={errorText(sp.error, t)} />
