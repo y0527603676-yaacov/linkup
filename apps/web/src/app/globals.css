@@ -247,3 +247,11 @@ input[type="range"] { padding: 0; border: 0; min-height: 32px; accent-color: var
 table.t { width: 100%; border-collapse: collapse; font-size: .92rem; }
 table.t th, table.t td { text-align: start; padding: 10px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
 table.t th { color: var(--muted); font-weight: 600; font-size: .8rem; }
+
+/* Instant feedback while the server responds (see NavFeedback). */
+html[data-nav] body::before { content: ""; position: fixed; inset-inline: 0; top: 0; height: 3px; z-index: 1000; pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--brand, #5b3df5), transparent); background-size: 50% 100%; background-repeat: no-repeat;
+  animation: lk-nav 0.9s linear infinite; }
+@keyframes lk-nav { from { background-position: -50% 0; } to { background-position: 150% 0; } }
+button[data-pending], .btn[data-pending] { opacity: .7; cursor: progress; }
+@media (prefers-reduced-motion: reduce) { html[data-nav] body::before { animation: none; background: var(--brand, #5b3df5); opacity: .6; } }

@@ -32,7 +32,7 @@ export function ConnectForm({ orgId, l, errors, defaultSite, rotate, legal, loca
     );
   }
   return (
-    <form action={action} className="card stack">
+    <form action={action} className="card stack" data-own-pending="">
       <input type="hidden" name="org" value={orgId} />
       {state.error && <p className="alert alert-error">{errors[state.error] ?? errors.unknown}</p>}
       <label className="field"><span>{l.site}</span>

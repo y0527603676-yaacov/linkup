@@ -5,19 +5,22 @@ import { getT } from "@/i18n";
 
 export type Org = { id: string; type: "store" | "creator" | "agency"; name: string; role: string };
 
+type MemberRow = { user_id: string; role: string; organizations: unknown };
+const toOrgs = (rows: MemberRow[] | null, userId: string): Org[] =>
+  (rows ?? []).filter((m) => m.user_id === userId).flatMap((m) => {
+    const o = m.organizations as { id: string; type: Org["type"]; name: string } | null;
+    return o ? [{ id: o.id, type: o.type, name: o.name, role: m.role }] : [];
+  });
+
+/** The user's activities. The identity check and the memberships read run in parallel (one round trip instead of two). */
 export async function getMyOrgs(): Promise<Org[]> {
   const sb = await getSupabase();
-  const { data: auth } = await sb.auth.getUser();
+  const [{ data: auth }, { data }] = await Promise.all([
+    sb.auth.getUser(),
+    sb.from("memberships").select("user_id, role, created_at, organizations(id, type, name)").order("created_at"),
+  ]);
   if (!auth.user) return [];
-  const { data } = await sb
-    .from("memberships")
-    .select("role, created_at, organizations(id, type, name)")
-    .eq("user_id", auth.user.id)
-    .order("created_at");
-  return (data ?? []).flatMap((m) => {
-    const o = m.organizations as unknown as { id: string; type: Org["type"]; name: string } | null;
-    return o ? [{ id: o.id, type: o.type, name: o.name, role: m.role as string }] : [];
-  });
+  return toOrgs(data as MemberRow[] | null, auth.user.id);
 }
 
 export function pickOrg(orgs: Org[], wanted?: string | string[]): Org | undefined {
@@ -39,14 +42,19 @@ export async function loadApp(sp: Record<string, string | string[] | undefined>,
   const org = pickOrg(orgs, sp.org)!;
   if (need && org.type !== need) redirect(`/app?org=${org.id}`);
   const sb = await getSupabase();
-  const [{ data: status }, { data: admin }] = await Promise.all([
+  // Status, admin flag and both possible legal contexts in one parallel round trip.
+  const typeCtx = org.type === "creator" ? "creator" : "store";
+  const [{ data: status }, { data: admin }, signupPend, typePend] = await Promise.all([
     sb.rpc("org_status", { p_org: org.id }),
     sb.rpc("is_platform_admin"),
+    sb.rpc("legal_pending", { p_context: "signup" }),
+    sb.rpc("legal_pending", { p_context: typeCtx }),
   ]);
   // Existing users accept newly published documents once (and again only after a material change).
   // Store commercial terms are asked at connection time; here only for stores that are already connected.
-  const ctxs = ["signup", org.type === "creator" ? "creator" : (status as OrgStatus | null)?.connected ? "store" : null].filter(Boolean) as string[];
-  const pend = await Promise.all(ctxs.map((c) => sb.rpc("legal_pending", { p_context: c })));
+  const useType = org.type === "creator" || (status as OrgStatus | null)?.connected === true;
+  const ctxs = ["signup", ...(useType ? [typeCtx] : [])];
+  const pend = [signupPend, ...(useType ? [typePend] : [])];
   if (pend.some((r) => Array.isArray(r.data) && r.data.length > 0)) {
     redirect(`/legal/accept?ctx=${ctxs.join(",")}&next=${encodeURIComponent(`/app?org=${org.id}`)}`);
   }

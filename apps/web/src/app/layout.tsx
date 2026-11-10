@@ -12,6 +12,8 @@ import "@fontsource/rubik/latin-600.css";
 import "@fontsource/rubik/latin-700.css";
 import "@fontsource/rubik/latin-800.css";
 import "./globals.css";
+import { Suspense } from "react";
+import { NavFeedback } from "@/components/NavFeedback";
 
 export async function generateMetadata(): Promise<Metadata> {
   const { t, locale } = await getT();
@@ -30,7 +32,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
     <html lang={locale} dir={dir}>
       <head>
       </head>
-      <body>{children}</body>
+      <body><Suspense fallback={null}><NavFeedback /></Suspense>{children}</body>
     </html>
   );
 }
