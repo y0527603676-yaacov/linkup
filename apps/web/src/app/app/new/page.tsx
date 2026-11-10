@@ -6,15 +6,19 @@ import { getT } from "@/i18n";
 import { getSupabase } from "@/lib/supabase/server";
 import { errorText } from "@/lib/format";
 import { createOrg } from "../actions";
+import { LegalChecks, type PendingDoc } from "@/components/LegalChecks";
 
 export default async function NewActivity({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const sp = await searchParams;
-  const { t } = await getT();
+  const { t, locale } = await getT();
   const o = t.onboarding;
   const type = sp.type === "creator" ? "creator" : sp.type === "store" ? "store" : null;
   const ref = (await cookies()).get("lk_ref")?.value;
+  const sb = await getSupabase();
   let refName: string | null = null;
-  if (ref) { const { data } = await (await getSupabase()).rpc("referrer_name", { p_code: ref }); refName = (data as string) ?? null; }
+  if (ref) { const { data } = await sb.rpc("referrer_name", { p_code: ref }); refName = (data as string) ?? null; }
+  const { data: pend } = await sb.rpc("legal_pending", { p_context: "signup" });
+  const pending = (pend ?? []) as PendingDoc[];
   return (
     <div className="auth-wrap">
       <div className="card stack">
@@ -38,6 +42,7 @@ export default async function NewActivity({ searchParams }: { searchParams: Prom
               <label className="field"><span>{o.website}</span>
                 <input name="website" dir="ltr" inputMode="url" placeholder="myshop.co.il" /></label>
             )}
+            <LegalChecks docs={pending} locale={locale} lead={t.legal.agree} />
             <button className="btn btn-primary btn-block">{o.create}</button>
           </form>
         ) : null}

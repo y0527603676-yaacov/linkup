@@ -38,6 +38,7 @@ export async function SiteFooter() {
           <Link href="/founding-partners">Founding Partners</Link>
           <Link href="/terms">{t.common.terms}</Link>
           <Link href="/privacy">{t.common.privacy}</Link>
+          <Link href="/legal">{t.legal.footer}</Link>
         </span>
       </div>
     </footer>

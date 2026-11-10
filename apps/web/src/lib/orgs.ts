@@ -43,6 +43,13 @@ export async function loadApp(sp: Record<string, string | string[] | undefined>,
     sb.rpc("org_status", { p_org: org.id }),
     sb.rpc("is_platform_admin"),
   ]);
+  // Existing users accept newly published documents once (and again only after a material change).
+  // Store commercial terms are asked at connection time; here only for stores that are already connected.
+  const ctxs = ["signup", org.type === "creator" ? "creator" : (status as OrgStatus | null)?.connected ? "store" : null].filter(Boolean) as string[];
+  const pend = await Promise.all(ctxs.map((c) => sb.rpc("legal_pending", { p_context: c })));
+  if (pend.some((r) => Array.isArray(r.data) && r.data.length > 0)) {
+    redirect(`/legal/accept?ctx=${ctxs.join(",")}&next=${encodeURIComponent(`/app?org=${org.id}`)}`);
+  }
   const { t, locale, dir } = await getT();
   return { sb, orgs, org, status: status as OrgStatus, isPlatformAdmin: admin === true, t, locale, dir };
 }

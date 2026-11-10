@@ -3,9 +3,11 @@ import { useActionState } from "react";
 import { connectStore, type ConnectState } from "../actions";
 import { CopyButton } from "@/components/CopyButton";
 import type { Dict } from "@/i18n/he";
+import { LegalChecks, type PendingDoc } from "@/components/LegalChecks";
 
-export function ConnectForm({ orgId, l, errors, defaultSite, rotate }: {
+export function ConnectForm({ orgId, l, errors, defaultSite, rotate, legal, locale, legalLead }: {
   orgId: string; l: Dict["connect"]; errors: Record<string, string>; defaultSite: string; rotate: boolean;
+  legal: PendingDoc[]; locale: string; legalLead: string;
 }) {
   const [state, action, pending] = useActionState<ConnectState, FormData>(connectStore, {});
   if (state.key && state.site) {
@@ -35,6 +37,7 @@ export function ConnectForm({ orgId, l, errors, defaultSite, rotate }: {
       {state.error && <p className="alert alert-error">{errors[state.error] ?? errors.unknown}</p>}
       <label className="field"><span>{l.site}</span>
         <input name="site" required dir="ltr" inputMode="url" placeholder="myshop.co.il" defaultValue={defaultSite} /></label>
+      <LegalChecks docs={legal} locale={locale} lead={legalLead} />
       <button className={rotate ? "btn btn-ghost" : "btn btn-primary"} disabled={pending}>{pending ? "…" : rotate ? l.rotate : l.create}</button>
     </form>
   );

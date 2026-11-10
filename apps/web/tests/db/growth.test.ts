@@ -62,6 +62,7 @@ beforeAll(async () => {
     d: "d@delta.co.il", e: "e@echo.com", staff: "staff@alpha.co.il", stranger: "nobody@x.com", admin: "admin@linkup.app",
   })) u[k] = { role: "authenticated", userId: await createUser(db, email) };
   await q(`insert into platform_admins(user_id) values ($1)`, [(u.admin as any).userId]);
+  await q(`update app_settings set value = 'true' where key = 'invoicing_tax_approved'`);
 
   org.R = await rpc(u.r!, "create_organization", { p_type: "creator", p_name: "Ref Creator" });
   org.B = await rpc(u.b!, "create_organization", { p_type: "store", p_name: "Ref Store" });
@@ -326,7 +327,9 @@ describe("billing → collected revenue → rewards", () => {
     await rpc(u.admin!, "generate_invoices", { p_period_start: monthStart(3) });
     const inv3 = (await q(`select id from invoices where store_org_id = $1 and period_start = $2`, [org.A, monthStart(3)]))[0]!;
     await rpc(u.admin!, "void_invoice", { p_invoice: inv3.id });
-    expect(await q(`select 1 from invoice_items where invoice_id = $1`, [inv3.id])).toHaveLength(0);
+    // Nothing is deleted: the voided request keeps its lines as history; they are free for the next run.
+    expect(await q(`select status from invoices where id = $1`, [inv3.id])).toEqual([{ status: "void" }]);
+    expect(await q(`select 1 from invoice_items where invoice_id = $1`, [inv3.id])).toHaveLength(1);
     expect(await rpc(u.admin!, "generate_invoices", { p_period_start: monthStart(3) })).toBe(1);
   });
 });
@@ -378,7 +381,7 @@ describe("wallet & privacy", () => {
     for (const leak of ["base_minor", "total_minor", "email", "fees_minor", "order"]) expect(s).not.toContain(leak);
   });
   it("transfers only above the minimum; rewards are never visible to other users", async () => {
-    await expect(rpc(u.admin!, "record_reward_transfer", { p_org: org.R, p_currency: "ILS", p_reference: "x" })).rejects.toThrow(/below_minimum/);
+    await expect(rpc(u.admin!, "record_reward_transfer", { p_org: org.R, p_currency: "ILS", p_reference: "x", p_doc_type: "tax_invoice", p_doc_number: "1", p_doc_date: null })).rejects.toThrow(/below_minimum/);
     // Row-level reward detail is not readable by any client (would reveal per-order sales of the referred party).
     await expect(db.as(u.stranger!, `select 1 from referral_rewards`)).rejects.toThrow(/permission denied/);
     await expect(db.as(u.r!, `select 1 from referral_rewards`)).rejects.toThrow(/permission denied/);
@@ -394,9 +397,13 @@ describe("wallet & privacy", () => {
     await ingest("B", "b-1", { coupons: [ce], total: 118_000, tax: 18_000 }, ago(20)); // base 100000, fee 2% = 2000
     await rpc(svc, "approve_matured_commissions");
     await backdate(`update commission_ledger set approved_at = $1 where state = 'approved' and store_org_id = $2`, [`${monthStart(1)}T12:00:00Z`, org.B]);
+    // Separate supply: B is a verified authorised dealer, so VAT is added to its reward before the offset.
+    await rpc(u.b!, "save_tax_profile", { p_org: org.B, p_legal_name: "Ref Store Ltd", p_classification: "authorized_dealer",
+      p_tax_id: "512345678", p_address: "Tel Aviv", p_country: "IL" });
+    await rpc(u.admin!, "verify_tax_profile", { p_org: org.B, p_zero_rate: false });
     await rpc(u.admin!, "generate_invoices", { p_period_start: monthStart(1) });
     const ib = (await q(`select fees_minor::int as f, credit_minor::int as c, total_minor::int as t from invoices where store_org_id = $1`, [org.B]))[0];
-    expect(ib).toEqual({ f: 2000, c: 160, t: 1840 });
+    expect(ib).toEqual({ f: 2000, c: 189, t: 2171 }); // 2000 + 18% VAT 360 − offset (reward 160 + its VAT 29)
     expect((await rpc(u.b!, "my_wallet")).activities.find((a: any) => a.org_id === org.B).balance_minor).toBe(0);
   });
 });

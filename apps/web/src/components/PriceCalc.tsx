@@ -24,7 +24,7 @@ export function PriceCalc({ l, locale }: { l: L; locale: "he" | "en" }) {
       </div>
       <div className="out" aria-live="polite">
         <div><span>{l.toCreator}</span><b>{fmt(toCreator)}</b></div>
-        <div><span>{l.toLinkup} (2%)</span><b>{fmt(toLinkup)}</b></div>
+        <div><span>{l.toLinkup} · 2%</span><b>{fmt(toLinkup)}</b></div>
         <div className="keep"><span>{l.youKeep}</span><b>{fmt(sale - toCreator - toLinkup)}</b></div>
       </div>
     </div>

@@ -2,6 +2,7 @@ import { AppShell, PageHead } from "@/components/AppShell";
 import { loadApp } from "@/lib/orgs";
 import { shortDate } from "@/lib/format";
 import { ConnectForm } from "./ConnectForm";
+import type { PendingDoc } from "@/components/LegalChecks";
 
 export default async function Connect({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const ctx = await loadApp(await searchParams, "store");
@@ -9,6 +10,7 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
   const { data: conns } = await sb.from("store_connections").select("status, site_url, last_sync_at, plugin_version").eq("org_id", org.id).order("created_at", { ascending: false }).limit(1);
   const c = conns?.[0];
   const { data: o } = await sb.from("organizations").select("website_url").eq("id", org.id).single();
+  const { data: pend } = await sb.rpc("legal_pending", { p_context: "store" });
   return (
     <AppShell ctx={ctx} active="settings" path="/app/connect">
       <div className="narrow">
@@ -20,7 +22,8 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
             {c.status === "connected" && <p className="small muted">{t.connect.rotateNote}</p>}
           </div>
         )}
-        <ConnectForm orgId={org.id} l={t.connect} errors={t.errors} defaultSite={c?.site_url ?? o?.website_url ?? ""} rotate={c?.status === "connected"} />
+        <ConnectForm orgId={org.id} l={t.connect} errors={t.errors} defaultSite={c?.site_url ?? o?.website_url ?? ""} rotate={c?.status === "connected"}
+          legal={(pend ?? []) as PendingDoc[]} locale={locale} legalLead={t.legal.agreeStore} />
       </div>
     </AppShell>
   );

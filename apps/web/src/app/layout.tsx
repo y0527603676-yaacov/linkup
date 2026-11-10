@@ -1,6 +1,16 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import { getT } from "@/i18n";
+import "@fontsource/rubik/hebrew-400.css";
+import "@fontsource/rubik/hebrew-500.css";
+import "@fontsource/rubik/hebrew-600.css";
+import "@fontsource/rubik/hebrew-700.css";
+import "@fontsource/rubik/hebrew-800.css";
+import "@fontsource/rubik/latin-400.css";
+import "@fontsource/rubik/latin-500.css";
+import "@fontsource/rubik/latin-600.css";
+import "@fontsource/rubik/latin-700.css";
+import "@fontsource/rubik/latin-800.css";
 import "./globals.css";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -19,9 +29,6 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   return (
     <html lang={locale} dir={dir}>
       <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
-        <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
       </head>
       <body>{children}</body>
     </html>

@@ -22,6 +22,11 @@ export async function createOrg(form: FormData) {
   const next = str(form, "next");
   const sb = await getSupabase();
   const ref = (await cookies()).get("lk_ref")?.value ?? null;
+  const legal = form.getAll("legal").map(String).filter(Boolean);
+  if (legal.length) {
+    const { error: le } = await sb.rpc("accept_legal", { p_doc_keys: legal, p_type: "signup", p_org: null });
+    if (le) redirect(`/app/new?error=${errorCode(le)}&type=${encodeURIComponent(type)}&next=${encodeURIComponent(next)}`);
+  }
   const { data, error } = await sb.rpc("create_organization", {
     p_type: type, p_name: str(form, "name"), p_website_url: str(form, "website") || null,
     p_ref_code: ref, p_locale: await getLocale(),
@@ -46,6 +51,11 @@ export async function updateOrg(form: FormData) {
 export type ConnectState = { error?: string; key?: string; site?: string };
 export async function connectStore(_prev: ConnectState, form: FormData): Promise<ConnectState> {
   const sb = await getSupabase();
+  const legal = form.getAll("legal").map(String).filter(Boolean);
+  if (legal.length) {
+    const { error: le } = await sb.rpc("accept_legal", { p_doc_keys: legal, p_type: "store_connection", p_org: str(form, "org") });
+    if (le) return { error: errorCode(le) };
+  }
   const { data, error } = await sb.rpc("create_store_connection", { p_org: str(form, "org"), p_site_url: str(form, "site") });
   if (error) return { error: errorCode(error) };
   const r = data as { connection_key: string; site_url: string };
@@ -211,7 +221,54 @@ export async function adminAction(form: FormData) {
     op === "generate" ? await sb.rpc("generate_invoices", { p_period_start: str(form, "period") })
     : op === "paid" ? await sb.rpc("mark_invoice_paid", { p_invoice: str(form, "id"), p_reference: str(form, "reference") || null })
     : op === "void" ? await sb.rpc("void_invoice", { p_invoice: str(form, "id") })
-    : op === "transfer" ? await sb.rpc("record_reward_transfer", { p_org: str(form, "target"), p_currency: "ILS", p_reference: str(form, "reference") || null })
+    : op === "delivered" ? await sb.rpc("mark_invoice_delivered", { p_invoice: str(form, "id"), p_method: str(form, "method"), p_reference: str(form, "reference") || null, p_delivered_at: str(form, "at") ? new Date(str(form, "at")).toISOString() : null })
+    : op === "rate" ? await sb.rpc("schedule_standard_rate_change", { p_new_bps: pctToBps(str(form, "pct"), -1), p_effective_from: new Date(str(form, "from")).toISOString(), p_note: str(form, "note") || null })
+    : op === "individual" ? await sb.rpc("set_individual_fee", { p_store: str(form, "store"), p_fee_bps: pctToBps(str(form, "pct"), -1), p_effective_from: new Date(str(form, "from")).toISOString(), p_effective_until: str(form, "until") ? new Date(str(form, "until")).toISOString() : null, p_note: str(form, "note") })
+    : op === "transfer" ? await sb.rpc("record_reward_transfer", { p_org: str(form, "target"), p_currency: "ILS", p_reference: str(form, "reference") || null,
+        p_doc_type: str(form, "doc_type"), p_doc_number: str(form, "doc_number"), p_doc_date: str(form, "doc_date") || null })
+    : op === "doc" ? await sb.rpc("record_accounting_document", { p_issuer: str(form, "issuer"), p_doc_type: str(form, "doc_type"), p_number: str(form, "number"),
+        p_issued_on: str(form, "date"), p_invoice: str(form, "invoice") || null, p_reward_payout: null,
+        p_amount_minor: pctToBps(str(form, "amount"), -1), p_vat_minor: pctToBps(str(form, "vat") || "0", 0), p_software: null, p_note: null })
+    : op === "verify" ? await sb.rpc("verify_tax_profile", { p_org: str(form, "target"), p_zero_rate: str(form, "zero") === "1" })
     : await sb.rpc("admin_set_setting", { p_key: str(form, "key"), p_value: str(form, "value") === "true" ? true : str(form, "value") === "false" ? false : Number(str(form, "value")) });
   redirect(back("/app/admin", org, error ? { error: errorCode(error) } : { ok: op }));
+}
+
+/* ---------- Fee terms (store admin answers a proposed increase) ---------- */
+export async function respondFee(form: FormData) {
+  const org = str(form, "org");
+  const sb = await getSupabase();
+  const { error } = await sb.rpc("respond_fee_change", { p_term: str(form, "term"), p_accept: str(form, "accept") === "1" });
+  redirect(back("/app/money", org, error ? { error: errorCode(error) } : { ok: "1" }));
+}
+
+/* ---------- Legal: one-time acceptance for existing users / re-acceptance ---------- */
+export async function acceptPendingLegal(form: FormData) {
+  const sb = await getSupabase();
+  const keys = form.getAll("legal").map(String).filter(Boolean);
+  const required = form.getAll("required").map(String).filter(Boolean);
+  const next = safeNext(str(form, "next") || "/app");
+  if (!required.every((k) => keys.includes(k))) redirect(`/legal/accept?error=legal_acceptance_required&ctx=${encodeURIComponent(str(form, "ctx"))}&next=${encodeURIComponent(next)}`);
+  const ctx = (str(form, "ctx") || "signup").split(",").filter((c) => ["signup", "store", "creator"].includes(c));
+  const lists = await Promise.all(ctx.map((c) => sb.rpc("legal_pending", { p_context: c })));
+  const re = new Set(lists.flatMap((r) => (r.data ?? []) as { doc_key: string; reacceptance: boolean }[]).filter((p) => p.reacceptance).map((p) => p.doc_key));
+  const fresh = keys.filter((k) => !re.has(k)), again = keys.filter((k) => re.has(k));
+  for (const [list, type] of [[fresh, "existing_user"], [again, "reacceptance"]] as const) {
+    if (!list.length) continue;
+    const { error } = await sb.rpc("accept_legal", { p_doc_keys: list, p_type: type, p_org: null });
+    if (error) redirect(`/legal/accept?error=${errorCode(error)}&next=${encodeURIComponent(next)}`);
+  }
+  redirect(next);
+}
+
+/* ---------- Business tax profile (activity admin) ---------- */
+export async function saveTaxProfile(form: FormData) {
+  const org = str(form, "org");
+  const sb = await getSupabase();
+  const { error } = await sb.rpc("save_tax_profile", {
+    p_org: org, p_legal_name: str(form, "legal_name"), p_classification: str(form, "classification"), p_tax_id: str(form, "tax_id") || null,
+    p_address: str(form, "address") || null, p_country: (str(form, "country") || "IL").toUpperCase(), p_no_il_presence: str(form, "no_il") === "1",
+    p_evidence: str(form, "evidence") || null, p_payment_method: str(form, "payment_method") || null,
+  });
+  redirect(back("/app/settings", org, error ? { error: errorCode(error) } : { ok: "1" }));
 }

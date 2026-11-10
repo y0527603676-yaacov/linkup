@@ -38,6 +38,7 @@ beforeAll(async () => {
   db = await createDb();
   for (const k of ["rs", "rc", "s", "c", "admin"]) u[k] = { role: "authenticated", userId: await createUser(db, `${k}@money.test`) };
   await q(`insert into platform_admins(user_id) values ($1)`, [(u.admin as any).userId]);
+  await q(`update app_settings set value = 'true' where key = 'invoicing_tax_approved'`);
   org.RS = await rpc(u.rs!, "create_organization", { p_type: "store", p_name: "Referrer Store" });
   org.RC = await rpc(u.rc!, "create_organization", { p_type: "creator", p_name: "Referrer Creator" });
   const rc = async (o: string) => (await q<{ c: string }>(`select referral_code c from organizations where id=$1`, [o]))[0]!.c;
@@ -75,7 +76,8 @@ describe("money paths, exact amounts", () => {
     expect(await rpc(u.admin!, "generate_invoices", { p_period_start: month(2) })).toBe(0);
     const inv = (await q(`select * from invoices where store_org_id = $1`, [org.S]))[0];
     expect(Number(inv.fees_minor)).toBe(500);        // 200 + 300; cancelled order contributes nothing
-    expect(Number(inv.total_minor)).toBe(500);
+    expect(Number(inv.vat_minor)).toBe(90);          // 18% VAT on the LINKUP fee
+    expect(Number(inv.total_minor)).toBe(590);
     await expect(rpc(u.s!, "generate_invoices", { p_period_start: month(2) })).rejects.toThrow(/forbidden/);
   });
   it("no reward before collection; after payment, two referrers get 20% each (40% total)", async () => {
@@ -131,18 +133,33 @@ describe("money paths, exact amounts", () => {
     await ev(connRS, { id: "rs-1", total: 118_000, tax: 18_000, coupons: [codeRS] }, ago(20));  // base 100 000 → fee 2 000
     await rpc(svc, "approve_matured_commissions");
     await backdate(`update commission_ledger set approved_at = $1 where state = 'approved' and store_org_id = $2`, [`${month(1)}T12:00:00Z`, org.RS]);
+    await rpc(u.rs!, "save_tax_profile", { p_org: org.RS, p_legal_name: "Ref Store Ltd", p_classification: "company",
+      p_tax_id: "515555555", p_address: "Haifa", p_country: "IL" });
+    await rpc(u.admin!, "verify_tax_profile", { p_org: org.RS, p_zero_rate: false });
     await rpc(u.admin!, "generate_invoices", { p_period_start: month(1) });
     const inv = (await q(`select * from invoices where store_org_id = $1`, [org.RS]))[0];
-    expect([Number(inv.fees_minor), Number(inv.credit_minor), Number(inv.total_minor)]).toEqual([2_000, 260, 1_740]);
+    // fee 2 000 + VAT 360 (on the full fee) − offset 307 (reward 260 + VAT 47 on the reward) = 2 053
+    expect([Number(inv.fees_minor), Number(inv.vat_minor), Number(inv.reward_offset_minor), Number(inv.reward_vat_minor),
+            Number(inv.credit_minor), Number(inv.total_minor)]).toEqual([2_000, 360, 260, 47, 307, 2_053]);
     expect((await rpc(u.rs!, "my_wallet")).activities.find((a: any) => a.org_id === org.RS).balance_minor).toBe(0);
     // Referrer RS is a party to the RS↔C deal: it earns nothing on its own sale.
     expect(await rewards(org.RS)).toBe(260);
   });
-  it("reward transfer: only above the minimum and never twice", async () => {
-    await expect(rpc(u.admin!, "record_reward_transfer", { p_org: org.RC, p_currency: "ILS", p_reference: "x" })).rejects.toThrow(/below_minimum/);
+  it("reward transfer: only above the minimum, with a verified profile and the referrer's document, never twice", async () => {
+    const tr = (ref: string, n = "77") => rpc(u.admin!, "record_reward_transfer", { p_org: org.RC, p_currency: "ILS", p_reference: ref,
+      p_doc_type: "exempt_invoice_receipt", p_doc_number: n, p_doc_date: null });
+    await expect(tr("x")).rejects.toThrow(/below_minimum/);
     await backdate(`update app_settings set value = '100' where key = 'reward_transfer_min_minor'`);
-    expect(await rpc(u.admin!, "record_reward_transfer", { p_org: org.RC, p_currency: "ILS", p_reference: "BANK-1" })).toBe(260);
-    await expect(rpc(u.admin!, "record_reward_transfer", { p_org: org.RC, p_currency: "ILS", p_reference: "BANK-2" })).rejects.toThrow(/below_minimum/);
+    await expect(tr("BANK-1")).rejects.toThrow(/tax_profile_required/);
+    await rpc(u.rc!, "save_tax_profile", { p_org: org.RC, p_legal_name: "Ref Creator", p_classification: "exempt_dealer",
+      p_tax_id: "301234567", p_address: "Jerusalem", p_country: "IL" });
+    await expect(tr("BANK-1")).rejects.toThrow(/tax_profile_required/);       // not verified yet
+    await rpc(u.admin!, "verify_tax_profile", { p_org: org.RC, p_zero_rate: false });
+    await expect(tr("BANK-1", " ")).rejects.toThrow(/document_required/);
+    expect(await tr("BANK-1")).toBe(260);                                     // exempt dealer: no VAT added
+    const doc = await q(`select issuer, doc_type, doc_number, amount_minor::int as a, vat_minor::int as v from accounting_documents where org_id = $1`, [org.RC]);
+    expect(doc).toEqual([{ issuer: "counterparty", doc_type: "exempt_invoice_receipt", doc_number: "77", a: 260, v: 0 }]);
+    await expect(tr("BANK-2")).rejects.toThrow(/below_minimum/);
     expect((await rpc(u.rc!, "my_wallet")).activities.find((a: any) => a.org_id === org.RC).balance_minor).toBe(0);
   });
 });

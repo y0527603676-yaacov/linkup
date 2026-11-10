@@ -9,3 +9,4 @@ coverage/
 apps/web/public/downloads/
 *.tsbuildinfo
 next-env.d.ts
+shots/
