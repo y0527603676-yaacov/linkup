@@ -16,8 +16,9 @@ function get_option($k, $d = false) { return $GLOBALS['opts'][$k] ?? $d; }
 function update_option($k, $v, $a = null) { $GLOBALS['opts'][$k] = $v; return true; }
 function delete_option($k) { unset($GLOBALS['opts'][$k]); }
 function wp_json_encode($v) { return json_encode($v, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); }
-function wp_remote_post($url, $args) { $GLOBALS['sent'][] = ['url' => $url, 'args' => $args]; return ['code' => $GLOBALS['http_code'], 'body' => '{"ok":true,"result":{"coupons":[]}}']; }
+function wp_remote_post($url, $args) { $GLOBALS['sent'][] = ['url' => $url, 'args' => $args]; return ['code' => $GLOBALS['http_code'], 'body' => $GLOBALS['http_body_override'] ?? '{"ok":true,"result":{"coupons":[]}}']; }
 if (!defined('DAY_IN_SECONDS')) define('DAY_IN_SECONDS', 86400);
+if (!defined('MINUTE_IN_SECONDS')) define('MINUTE_IN_SECONDS', 60);
 function wc_get_orders($a) { return []; }
 function linkup_send_order_now_stub() {}
 function wp_remote_retrieve_response_code($r) { return $r['code']; }
@@ -30,6 +31,9 @@ function set_url_scheme($u, $s) { return preg_replace('#^http://#', 'https://', 
 function get_woocommerce_currency() { return 'ILS'; }
 function wc_get_product_terms($id, $tax, $a) { return ['טבעות']; }
 function get_post_type($id) { return 'product'; }
+$GLOBALS['coupon_posts'] = [];
+function get_posts($a) { return array_keys(array_filter($GLOBALS['coupon_posts'], fn($c) => $c['status'] === ($a['post_status'] ?? 'publish') && ($c['meta']['_linkup_managed'] ?? '') === '1')); }
+function wp_update_post($a) { $GLOBALS['coupon_posts'][$a['ID']]['status'] = $a['post_status']; return $a['ID']; }
 function as_has_scheduled_action(...$a) { return false; }
 function as_schedule_recurring_action(...$a) {} function as_schedule_single_action(...$a) {} function as_unschedule_all_actions(...$a) {}
 class FakeProduct {
@@ -96,7 +100,38 @@ $GLOBALS['sent'] = []; $GLOBALS['http_code'] = 200;
 $res = linkup_rest_connect(new WP_REST_Request(['key' => 'lk_' . str_repeat('c', 32) . '_' . str_repeat('d', 64)]));
 $ok($res['connected'] === true && get_option('linkup_connection_key') === 'lk_' . str_repeat('c', 32) . '_' . str_repeat('d', 64), 'valid key saved and connection started');
 $ok(!array_key_exists('key', $res) && strpos(json_encode($res), str_repeat('d', 64)) === false, 'the secret is never returned');
-$ok(linkup_rest_status()['version'] === '0.4.0', 'status reports the plugin version');
+$ok(linkup_rest_status()['version'] === '0.4.1', 'status reports the plugin version');
+// 6. visitor consent for the 30-day referral cookie
+if (!function_exists('apply_filters')) { function apply_filters($h, $v) { return $v; } }
+if (!function_exists('wp_unslash')) { function wp_unslash($v) { return $v; } }
+if (!function_exists('is_ssl')) { function is_ssl() { return true; } }
+if (!function_exists('sanitize_text_field')) { function sanitize_text_field($v) { return trim((string) $v); } }
+$visit = function () { unset($_COOKIE['linkup_ref']); $_GET['lku'] = 'AB12CD'; @do_hook('init'); return $_COOKIE['linkup_ref'] ?? null; };
+unset($GLOBALS['opts']['linkup_consent_mode']);
+$ok(preg_match('/^AB12CD\|\d{10}$/', (string) $visit()) === 1, 'no consent tool: default "notice" mode sets the cookie');
+$GLOBALS['opts']['linkup_consent_mode'] = 'require';
+$ok($visit() === null, '"require" mode without a consent tool: no cookie (coupons still work)');
+eval('function wp_has_consent($c) { return !empty($GLOBALS["consent"][$c]); }');
+$GLOBALS['consent'] = ['marketing' => false];
+$ok($visit() === null, 'WP Consent API present and visitor declined marketing: no cookie');
+$GLOBALS['consent'] = ['marketing' => true];
+$ok(preg_match('/^AB12CD\|/', (string) $visit()) === 1, 'WP Consent API present and visitor agreed: cookie set');
+unset($_GET['lku']);
+// 7. referral saved on the order for classic AND block checkout
+$ok(!empty($GLOBALS['hooks']['woocommerce_checkout_order_created']) && !empty($GLOBALS['hooks']['woocommerce_store_api_checkout_order_processed']), 'both checkout types store the referral');
+$o = new class { public $m = []; public $saved = 0; function get_meta($k) { return $this->m[$k] ?? ''; } function update_meta_data($k, $v) { $this->m[$k] = $v; } function save() { $this->saved++; } };
+$_COOKIE['linkup_ref'] = 'AB12CD|' . (time() - 7 * 86400);
+linkup_attach_ref($o);
+$ok($o->m['_linkup_ref'] === $_COOKIE['linkup_ref'], 'a referral from 7 days ago is written to the order');
+$_COOKIE['linkup_ref'] = 'ZZ99ZZ|' . time(); linkup_attach_ref($o);
+$ok(str_starts_with($o->m['_linkup_ref'], 'AB12CD|') && $o->saved === 1, 'an order keeps its first referral (no double write from the second checkout hook)');
+// 8. disconnected in LINKUP → the plugin stops by itself
+$GLOBALS['opts']['linkup_connection_key'] = 'lk_' . str_repeat('c', 32) . '_' . str_repeat('d', 64);
+$GLOBALS['coupon_posts'] = [11 => ['status' => 'publish', 'meta' => ['_linkup_managed' => '1']], 12 => ['status' => 'publish', 'meta' => []]];
+$GLOBALS['http_body_override'] = '{"error":"connection_disconnected"}'; $GLOBALS['http_code'] = 422;
+$ok(linkup_sync() === false && empty($GLOBALS['opts']['linkup_connection_key']), 'disconnect in LINKUP clears the key; nothing more is sent');
+$ok($GLOBALS['coupon_posts'][11]['status'] === 'draft' && $GLOBALS['coupon_posts'][12]['status'] === 'publish', 'disconnect pauses only LINKUP partner coupons (store coupons untouched)');
+unset($GLOBALS['http_body_override']); $GLOBALS['http_code'] = 200;
 $GLOBALS['opts']['linkup_connection_key'] = '';
 // export a realistic batch for the DB test
 $batch = []; foreach ([1, 2, 3, 10, 11, 12, 4, 5] as $id) { $batch[] = linkup_product_payload(wc_get_product($id)); }

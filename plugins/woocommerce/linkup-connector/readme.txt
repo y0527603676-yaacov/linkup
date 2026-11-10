@@ -5,7 +5,7 @@ Requires at least: 6.4
 Tested up to: 6.8
 Requires PHP: 7.4
 WC requires at least: 8.0
-Stable tag: 0.4.0
+Stable tag: 0.4.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -39,6 +39,11 @@ The plugin sets one first-party cookie, `linkup_ref`, when a visitor arrives thr
 Install and activate the plugin, then go to WooCommerce → LINKUP and paste the connection key from LINKUP.
 
 == Changelog ==
+
+= 0.4.1 =
+* Visitor consent: respects the WP Consent API (marketing) or the store's setting (notice / require).
+* Block checkout (Store API) support for referrals.
+* Stops by itself when the store disconnects in LINKUP; partner coupons go to draft on disconnect or uninstall; uninstall removes the plugin's settings.
 
 = 0.4.0 =
 * Remote setup routes for one-approval onboarding (store managers only; the key is never returned).

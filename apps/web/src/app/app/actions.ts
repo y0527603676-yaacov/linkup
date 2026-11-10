@@ -92,6 +92,43 @@ export async function syncWooApi(form: FormData) {
   redirect(back("/app/connect", org, error ? { error: errorCode(error) } : { ok: "sync" }));
 }
 
+/* ---------- Connect with one approval (WordPress installs the LINKUP Connector) ---------- */
+export async function startWpConnect(form: FormData) {
+  const org = str(form, "org");
+  const sb = await getSupabase();
+  const { getT } = await import("@/i18n");
+  const { t } = await getT();
+  const w = t.connect.wp;
+  const legal = form.getAll("legal").map(String).filter(Boolean);
+  if (legal.length) {
+    if (str(form, "agree") !== "1") redirect(back("/app/connect", org, { error: "legal_acceptance_required" }));
+    const { error: le } = await sb.rpc("accept_legal", { p_doc_keys: legal, p_type: "store_connection", p_org: org, p_locale: await getLocale() });
+    if (le) redirect(back("/app/connect", org, { error: errorCode(le) }));
+  }
+  const items = form.getAll("consent").map(String).filter((k) => k in w.items);
+  const mode = str(form, "mode") === "require" ? "require" : "notice";
+  // The exact wording the owner saw and ticked is what gets recorded.
+  const text = [`${w.consentTitle}:`, ...items.map((k, i) => `${i + 1}. ${w.items[k]}`),
+    `${w.modeTitle} ${mode === "require" ? w.modeRequire : w.modeNotice}`].join("\n");
+  const ua = (await (await import("next/headers")).headers()).get("user-agent");
+  const { data, error } = await sb.rpc("start_wp_connect", { p_org: org, p_site_url: str(form, "site"), p_items: items, p_consent_text: text, p_user_agent: ua });
+  if (error) redirect(back("/app/connect", org, { error: errorCode(error) }));
+  const r = data as { state: string; site_url: string };
+  const { wpAuthorizeUrl } = await import("@/lib/wp-connect");
+  const ret = `${await getOrigin()}/app/connect/wp-return?org=${org}&state=${r.state}&mode=${mode}`;
+  redirect(wpAuthorizeUrl(r.site_url, WP_APP_ID, ret, `${ret}&rejected=1`));
+}
+
+/** Fixed id that identifies LINKUP's application passwords in WordPress (shown to the owner as "LINKUP setup …"). */
+const WP_APP_ID = "6f1c0d5e-3b7a-4c2e-9a41-0b9d2c7e5f11";
+
+export async function disconnectStore(form: FormData) {
+  const org = str(form, "org");
+  const { error } = await (await getSupabase()).rpc("disconnect_store", { p_org: org });
+  revalidatePath("/app/connect");
+  redirect(back("/app/connect", org, error ? { error: errorCode(error) } : { ok: "disconnected" }));
+}
+
 /* ---------- Direct invites (proposals) ---------- */
 export async function createInvite(form: FormData) {
   const org = str(form, "org");

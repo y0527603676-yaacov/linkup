@@ -2,7 +2,7 @@
 /**
  * Plugin Name: LINKUP Connector
  * Description: מחבר את חנות ה-WooCommerce ל-LINKUP — קופונים לשותפים, מעקב הפניות ודיווח מכירות מאובטח.
- * Version: 0.4.0
+ * Version: 0.4.1
  * Requires at least: 6.4
  * Requires PHP: 7.4
  * WC requires at least: 8.0
@@ -15,7 +15,7 @@
 
 defined('ABSPATH') || exit;
 
-define('LINKUP_VERSION', '0.4.0');
+define('LINKUP_VERSION', '0.4.1');
 define('LINKUP_ENDPOINT', 'https://ycuvcpslvkgndytubycn.supabase.co/functions/v1/woo');
 define('LINKUP_OPT_KEY', 'linkup_connection_key');
 define('LINKUP_OPT_LAST', 'linkup_last_sync');
@@ -69,9 +69,21 @@ function linkup_post(array $payload) {
 
 /* ------------------------------------------------------------------
  * 1. Referral link capture: ?lku=CODE → first-party cookie "CODE|timestamp"
+ *    Visitor consent: if the site uses the WP Consent API (most consent banners support it), the cookie is set
+ *    only after consent for "marketing". Without it, the store's setting decides (default: set; "require" = never
+ *    without the Consent API). Coupons keep working either way.
  * ------------------------------------------------------------------ */
+function linkup_may_track() {
+    if (function_exists('wp_has_consent')) {
+        $ok = (bool) wp_has_consent('marketing');
+    } else {
+        $ok = get_option('linkup_consent_mode', 'notice') !== 'require';
+    }
+    return (bool) apply_filters('linkup_may_track', $ok);
+}
+
 add_action('init', static function () {
-    if (empty($_GET['lku'])) {
+    if (empty($_GET['lku']) || !linkup_may_track()) {
         return;
     }
     $code = preg_replace('/[^A-Za-z0-9]/', '', (string) wp_unslash($_GET['lku']));
@@ -89,15 +101,19 @@ add_action('init', static function () {
     $_COOKIE[LINKUP_COOKIE] = $value;
 });
 
-add_action('woocommerce_checkout_order_created', static function ($order) {
-    if (!empty($_COOKIE[LINKUP_COOKIE])) {
-        $raw = sanitize_text_field(wp_unslash($_COOKIE[LINKUP_COOKIE]));
-        if (preg_match('/^[A-Za-z0-9]{4,16}\|[0-9]{9,11}$/', $raw)) {
-            $order->update_meta_data('_linkup_ref', $raw);
-            $order->save();
-        }
+/** Stores the referral on the order at checkout — classic checkout and the block (Store API) checkout. */
+function linkup_attach_ref($order) {
+    if (!$order || empty($_COOKIE[LINKUP_COOKIE]) || $order->get_meta('_linkup_ref')) {
+        return;
     }
-});
+    $raw = sanitize_text_field(wp_unslash($_COOKIE[LINKUP_COOKIE]));
+    if (preg_match('/^[A-Za-z0-9]{4,16}\|[0-9]{9,11}$/', $raw)) {
+        $order->update_meta_data('_linkup_ref', $raw);
+        $order->save();
+    }
+}
+add_action('woocommerce_checkout_order_created', 'linkup_attach_ref');
+add_action('woocommerce_store_api_checkout_order_processed', 'linkup_attach_ref');
 
 /* ------------------------------------------------------------------
  * 2. Order events — deterministic event ids (order + modification time),
@@ -200,6 +216,10 @@ add_action('init', static function () {
 
 function linkup_sync() {
     list($code, $res) = linkup_post(array('action' => 'sync', 'plugin_version' => LINKUP_VERSION));
+    if ($code === 422 && isset($res['error']) && $res['error'] === 'connection_disconnected') {
+        linkup_forget_connection();   // the store disconnected in LINKUP: stop sending anything
+        return false;
+    }
     if ($code !== 200 || empty($res['ok'])) {
         update_option(LINKUP_OPT_LAST, array('ok' => false, 'code' => $code, 'at' => time()), false);
         return false;
@@ -448,6 +468,25 @@ function linkup_settings_page() {
  *    right after setup), installs this plugin from WordPress.org, then calls these routes to save the key.
  *    Only users who can manage WooCommerce may call them; the key itself is never returned.
  * ------------------------------------------------------------------ */
+/** Partner coupons created by LINKUP go back to draft (kept, not deleted) – no active discount stays behind untracked. */
+function linkup_pause_managed_coupons() {
+    $ids = get_posts(array('post_type' => 'shop_coupon', 'post_status' => 'publish', 'numberposts' => 500, 'fields' => 'ids',
+                           'meta_key' => '_linkup_managed', 'meta_value' => '1'));
+    foreach ($ids as $id) {
+        wp_update_post(array('ID' => $id, 'post_status' => 'draft'));
+    }
+    return count($ids);
+}
+
+function linkup_forget_connection() {
+    linkup_pause_managed_coupons();
+    delete_option(LINKUP_OPT_KEY);
+    update_option(LINKUP_OPT_LAST, array('ok' => false, 'code' => 'disconnected', 'at' => time()), false);
+    if (function_exists('as_unschedule_all_actions')) {
+        as_unschedule_all_actions('linkup_sync');
+    }
+}
+
 function linkup_rest_can_manage() {
     return current_user_can('manage_woocommerce');
 }
@@ -455,6 +494,7 @@ function linkup_rest_can_manage() {
 function linkup_rest_status() {
     $last = get_option(LINKUP_OPT_LAST, array());
     return array('version' => LINKUP_VERSION, 'connected' => (bool) linkup_credentials(),
+                 'consent_api' => function_exists('wp_has_consent'), 'consent_mode' => get_option('linkup_consent_mode', 'notice'),
                  'last_ok' => !empty($last['ok']), 'last_at' => isset($last['at']) ? (int) $last['at'] : null);
 }
 
@@ -462,6 +502,10 @@ function linkup_rest_connect($request) {
     $key = trim((string) $request->get_param('key'));
     if (!preg_match('/^lk_[0-9a-f]{32}_[0-9a-f]{64}$/', $key)) {
         return new WP_Error('linkup_invalid_key', 'Invalid connection key', array('status' => 400));
+    }
+    $mode = (string) $request->get_param('consent_mode');
+    if (in_array($mode, array('notice', 'require'), true)) {
+        update_option('linkup_consent_mode', $mode, false);
     }
     update_option(LINKUP_OPT_KEY, $key, false);
     $synced = linkup_sync();
@@ -473,7 +517,8 @@ add_action('rest_api_init', static function () {
         'methods' => 'GET', 'callback' => 'linkup_rest_status', 'permission_callback' => 'linkup_rest_can_manage'));
     register_rest_route('linkup/v1', '/connect', array(
         'methods' => 'POST', 'callback' => 'linkup_rest_connect', 'permission_callback' => 'linkup_rest_can_manage',
-        'args' => array('key' => array('required' => true, 'type' => 'string'))));
+        'args' => array('key' => array('required' => true, 'type' => 'string'),
+                        'consent_mode' => array('type' => 'string', 'enum' => array('notice', 'require')))));
 });
 
 register_deactivation_hook(__FILE__, static function () {
