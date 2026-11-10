@@ -18,7 +18,11 @@ export async function GET(req: NextRequest) {
     // The default link only works in the browser that asked for it; say so instead of "invalid link".
     if (error && /verifier/i.test(`${(error as { code?: string }).code ?? ""} ${error.message}`)) reason = "link_other_browser";
   }
-  else if (tokenHash) ok = !(await sb.auth.verifyOtp({ token_hash: tokenHash, type: (p.get("type") ?? "email") as EmailOtpType })).error;
+  else if (tokenHash) {
+    // Link from the e-mail template (token hash): works in any browser. Only sign-in links are accepted here.
+    const type = p.get("type") === "magiclink" ? "magiclink" : "email";
+    ok = !(await sb.auth.verifyOtp({ token_hash: tokenHash, type: type as EmailOtpType })).error;
+  }
   const dest = req.nextUrl.clone();
   dest.search = "";
   if (ok) {

@@ -5,6 +5,7 @@ import { getT } from "@/i18n";
 import { errorText, safeNext } from "@/lib/format";
 import { sendLink, verifyCode } from "./actions";
 import { LOGIN_EMAIL_HAS_CODE } from "@/lib/auth-config";
+import { CodeEntry } from "@/components/CodeEntry";
 
 export default async function Login({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const sp = await searchParams;
@@ -18,15 +19,11 @@ export default async function Login({ searchParams }: { searchParams: Promise<Re
         {sp.sent && sp.email ? (
           <>
             <h1>{l.sentTitle}</h1>
-            <p className="muted">{LOGIN_EMAIL_HAS_CODE ? l.sentTextCode(sp.email) : l.sentText(sp.email)}</p>
+            <p className="muted">{l.sentText(sp.email)}</p>
             <Alert text={errorText(sp.error, t)} />
             {LOGIN_EMAIL_HAS_CODE && (
-              <form action={verifyCode} className="stack">
-                <input type="hidden" name="email" value={sp.email} /><input type="hidden" name="next" value={next} />
-                <label className="field"><span>{l.code}</span>
-                  <input name="code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9 ]{6,12}" required dir="ltr" /></label>
-                <button className="btn btn-primary btn-block">{l.verify}</button>
-              </form>
+              <CodeEntry email={sp.email} next={next} action={verifyCode} forced={sp.error === "bad_code" || sp.error === "link_other_browser"}
+                copy={{ codeHint: l.codeHint, code: l.code, verify: l.verify }} />
             )}
             {sp.resent && !sp.error && <p className="badge badge-brand">{l.resent}</p>}
             <p className="small muted">{l.spam}</p>

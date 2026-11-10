@@ -138,7 +138,7 @@ export const en: Dict = {
     lead: "We'll email you a sign-in link. Click it to log in — no password needed.",
     email: "Email", send: "Send sign-in link", sentTitle: "Check your email",
     sentText: (e: string) => `We sent a sign-in link to ${e}. Open the email and click the link to continue.`,
-    sentTextCode: (e: string) => `We sent a sign-in link and a code to ${e}. Click the link, or type the code from the email here.`, code: "Code from the email", verify: "Log in",
+    codeHint: "Using the home-screen app, or did the link open in another browser? Type the code from the same email here.", code: "Code from the email", verify: "Log in",
     spam: "Not there after a few minutes? Check your spam or promotions folder.", resend: "Resend the link", resent: "A new link is on its way.", other: "Different email",
   },
   onboarding: {
