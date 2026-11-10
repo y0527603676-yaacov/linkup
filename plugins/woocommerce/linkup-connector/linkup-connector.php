@@ -2,7 +2,7 @@
 /**
  * Plugin Name: LINKUP Connector
  * Description: מחבר את חנות ה-WooCommerce ל-LINKUP — קופונים לשותפים, מעקב הפניות ודיווח מכירות מאובטח.
- * Version: 0.3.0
+ * Version: 0.3.1
  * Requires at least: 6.4
  * Requires PHP: 7.4
  * WC requires at least: 8.0
@@ -11,7 +11,7 @@
 
 defined('ABSPATH') || exit;
 
-define('LINKUP_VERSION', '0.3.0');
+define('LINKUP_VERSION', '0.3.1');
 define('LINKUP_ENDPOINT', 'https://ycuvcpslvkgndytubycn.supabase.co/functions/v1/woo');
 define('LINKUP_OPT_KEY', 'linkup_connection_key');
 define('LINKUP_OPT_LAST', 'linkup_last_sync');
@@ -251,7 +251,32 @@ function linkup_product_payload($product) {
     );
 }
 
-function linkup_send_products(array $ids, $full_started_at = null) {
+/**
+ * Fire-and-forget signed POST for product updates: the admin's "save product" never waits for LINKUP.
+ * Anything lost here is picked up by the periodic full catalogue pass. (Order events keep using linkup_post.)
+ */
+function linkup_post_nowait(array $payload) {
+    $cred = linkup_credentials();
+    if (!$cred) {
+        return false;
+    }
+    $body = wp_json_encode($payload);
+    $ts = time();
+    wp_remote_post(LINKUP_ENDPOINT, array(
+        'timeout'  => 0.01,
+        'blocking' => false,
+        'headers'  => array(
+            'Content-Type'        => 'application/json',
+            'X-Linkup-Connection' => $cred[0],
+            'X-Linkup-Timestamp'  => (string) $ts,
+            'X-Linkup-Signature'  => linkup_sign($body, $ts, $cred[1]),
+        ),
+        'body'     => $body,
+    ));
+    return true;
+}
+
+function linkup_send_products(array $ids, $full_started_at = null, $nowait = false) {
     $items = array();
     foreach (array_unique(array_map('intval', $ids)) as $id) {
         $p = linkup_product_payload(wc_get_product($id));
@@ -265,6 +290,9 @@ function linkup_send_products(array $ids, $full_started_at = null) {
     $payload = array('action' => 'products', 'products' => $items);
     if ($full_started_at) {
         $payload['full_started_at'] = gmdate('c', (int) $full_started_at - 600); // tolerate clock skew
+    }
+    if ($nowait) {
+        return linkup_post_nowait($payload);
     }
     list($code) = linkup_post($payload);
     return $code === 200;
@@ -294,7 +322,7 @@ add_action('shutdown', static function () {
     $ids = array_keys($GLOBALS['linkup_product_queue']);
     if ($ids && linkup_credentials()) {
         foreach (array_chunk($ids, 50) as $chunk) {
-            linkup_send_products($chunk);
+            linkup_send_products($chunk, null, true);
         }
     }
 }, 20);

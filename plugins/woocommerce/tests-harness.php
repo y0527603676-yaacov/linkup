@@ -59,11 +59,14 @@ do_hook('shutdown');
 $prod_posts = array_values(array_filter($GLOBALS['sent'], fn($s) => json_decode($s['args']['body'], true)['action'] === 'products'));
 $b = json_decode($prod_posts[0]['args']['body'], true);
 $ok(count($prod_posts) === 1 && count($b['products']) === 2, 'one batched request at shutdown (product 1 once + parent of variation)');
+$ok($prod_posts[0]['args']['blocking'] === false && $prod_posts[0]['args']['timeout'] < 1, 'product save does not wait for LINKUP (non-blocking request)');
 $h = $prod_posts[0]['args']['headers'];
 $ok($h['X-Linkup-Signature'] === hash_hmac('sha256', $h['X-Linkup-Timestamp'] . '.' . $prod_posts[0]['args']['body'], str_repeat('b', 64)), 'request signed exactly like order events (HMAC)');
 $ok($h['X-Linkup-Connection'] === str_repeat('a', 32) && $prod_posts[0]['url'] === LINKUP_ENDPOINT, 'same endpoint and connection id as v0.2.1');
 // 3. full pass: 100 per sync, last page carries full_started_at, failure retries same page
 $GLOBALS['sent'] = []; unset($GLOBALS['opts']['linkup_products_pass']);
+// order events are untouched: still blocking with retry semantics
+$ok(strpos(file_get_contents(__DIR__ . '/linkup-connector/linkup-connector.php'), "'timeout' => 15,") !== false, 'order reporting request unchanged (blocking, 15s, retried on failure)');
 linkup_products_full_pass_step(); linkup_products_full_pass_step();
 $GLOBALS['http_code'] = 503; linkup_products_full_pass_step(); $ok(get_option('linkup_products_pass')['page'] === 3, 'failed page is retried (does not advance)');
 $GLOBALS['http_code'] = 200; linkup_products_full_pass_step();

@@ -1,4 +1,4 @@
-# Heleni — plugin upgrade 0.2.1 → 0.3.0 (needs your separate approval)
+# Heleni — plugin upgrade 0.2.1 → 0.3.1 (needs your separate approval)
 
 ## What changes
 Only additions: product & stock sync (read-only towards the store — LINKUP never edits products).
@@ -18,7 +18,7 @@ Order reporting, coupons, the `?lku=` link cookie, the connection key and settin
 3. Rollback file ready: https://linkup-tawny.vercel.app/downloads/linkup-connector-0.2.1.zip
 
 ## Install (2 minutes)
-Plugins → Add New → Upload Plugin → choose linkup-connector.zip (0.3.0) → Install → "Replace current with uploaded".
+Plugins → Add New → Upload Plugin → choose linkup-connector.zip (0.3.1) → Install → "Replace current with uploaded".
 The connection key stays saved. Then LINKUP settings → "Sync now".
 
 ## Check after install
@@ -28,3 +28,7 @@ The connection key stays saved. Then LINKUP settings → "Sync now".
 ## Rollback
 Same upload flow with linkup-connector-0.2.1.zip → "Replace current with uploaded". Settings and key stay.
 Products already synced remain in LINKUP (harmless); nothing in the store changes.
+
+## 0.3.1 change
+Product updates on save are sent fire-and-forget (non-blocking), so saving a product never waits for LINKUP.
+Anything missed is caught by the 6-hourly full catalogue pass. Order reporting is unchanged.
