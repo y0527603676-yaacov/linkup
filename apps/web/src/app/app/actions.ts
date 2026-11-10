@@ -308,6 +308,8 @@ export async function adminAction(form: FormData) {
     : op === "doc" ? await sb.rpc("record_accounting_document", { p_issuer: str(form, "issuer"), p_doc_type: str(form, "doc_type"), p_number: str(form, "number"),
         p_issued_on: str(form, "date"), p_invoice: str(form, "invoice") || null, p_reward_payout: null,
         p_amount_minor: pctToBps(str(form, "amount"), -1), p_vat_minor: pctToBps(str(form, "vat") || "0", 0), p_software: null, p_note: null })
+    : op === "test_add" ? await sb.rpc("admin_add_test_signup", { p_email: str(form, "email"), p_note: str(form, "note") || null })
+    : op === "test_remove" ? await sb.rpc("admin_remove_test_signup", { p_email: str(form, "email") })
     : op === "verify" ? await sb.rpc("verify_tax_profile", { p_org: str(form, "target"), p_zero_rate: str(form, "zero") === "1" })
     : await sb.rpc("admin_set_setting", { p_key: str(form, "key"), p_value: str(form, "value") === "true" ? true : str(form, "value") === "false" ? false : Number(str(form, "value")) });
   redirect(back("/app/admin", org, error ? { error: errorCode(error) } : { ok: op }));

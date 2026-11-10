@@ -15,6 +15,8 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
     sb.rpc("legal_admin_documents"), sb.rpc("admin_contact_messages")]);
   const [{ data: fn }, { data: fd }, { data: exq }, { data: vb }] = await Promise.all([sb.rpc("admin_fee_notices"), sb.rpc("finance_dashboard"), sb.rpc("billing_exceptions"), sb.rpc("admin_vat_basis_pending")]);
   const vatPending = (vb ?? []) as any[];
+  const { data: ts } = await sb.rpc("admin_test_signups");
+  const testSignups = (ts ?? []) as { email: string; note: string | null; registered: boolean }[];
   const F = (fd ?? {}) as Record<string, any>;
   const exceptions = (exq ?? []) as any[];
   const bl = t.billing;
@@ -216,6 +218,21 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
               <button className="btn btn-ghost btn-sm">{a.vatBasisDecide}</button></form>))}</div>
         </section>
       )}
+
+      <section className="section"><H>{a.testTitle}</H>
+        <p className="small muted">{a.testLead}</p>
+        <form action={adminAction} className="row" style={{ flexWrap: "wrap", gap: 8 }}>{hidden}<input type="hidden" name="op" value="test_add" />
+          <input name="email" type="email" required dir="ltr" placeholder="name+store@gmail.com" style={{ flex: 2, minWidth: 200 }} />
+          <input name="note" maxLength={200} placeholder={a.testNote} style={{ flex: 1, minWidth: 140 }} />
+          <button className="btn btn-primary btn-sm">{a.testAdd}</button></form>
+        {testSignups.length > 0 && <div className="list" style={{ marginTop: 12 }}>{testSignups.map((x) => (
+          <div className="item" key={x.email}>
+            <div className="grow"><div className="title ltr">{x.email}</div>{x.note && <div className="meta">{x.note}</div>}</div>
+            <span className={`badge ${x.registered ? "badge-money" : ""}`}>{x.registered ? a.testRegistered : a.testWaiting}</span>
+            <form action={adminAction}>{hidden}<input type="hidden" name="op" value="test_remove" /><input type="hidden" name="email" value={x.email} />
+              <button className="btn btn-ghost btn-sm">{a.testRemove}</button></form>
+          </div>))}</div>}
+      </section>
 
       <section className="section"><H>{t.legal.drafts}</H>
         <p className="small muted">{t.legal.draftNote}</p>

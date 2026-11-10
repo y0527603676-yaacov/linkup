@@ -15,7 +15,9 @@ export async function sendLink(form: FormData) {
   const origin = await getOrigin();
   // Public sign-up stays closed until the sign-in e-mail test passes (set LINKUP_SIGNUPS_OPEN=true in Vercel).
   // Until then only existing accounts can log in.
-  const open = process.env.LINKUP_SIGNUPS_OPEN === "true";
+  // While sign-up is closed, only addresses the admin approved for testing may create a new account.
+  const open = process.env.LINKUP_SIGNUPS_OPEN === "true"
+    || (await sb.rpc("signup_allowed", { p_email: email })).data === true;
   const { error } = await sb.auth.signInWithOtp({
     email,
     options: { shouldCreateUser: open, emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(next)}` },

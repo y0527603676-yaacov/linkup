@@ -4,13 +4,13 @@ import { cookies } from "next/headers";
 import { getSupabase } from "./supabase/server";
 import { getT } from "@/i18n";
 
-export type Org = { id: string; type: "store" | "creator" | "agency"; name: string; role: string };
+export type Org = { id: string; type: "store" | "creator" | "agency"; name: string; role: string; isTest?: boolean };
 
 type MemberRow = { user_id: string; role: string; organizations: unknown };
 const toOrgs = (rows: MemberRow[] | null, userId: string): Org[] =>
   (rows ?? []).filter((m) => m.user_id === userId).flatMap((m) => {
-    const o = m.organizations as { id: string; type: Org["type"]; name: string } | null;
-    return o ? [{ id: o.id, type: o.type, name: o.name, role: m.role }] : [];
+    const o = m.organizations as { id: string; type: Org["type"]; name: string; is_test?: boolean } | null;
+    return o ? [{ id: o.id, type: o.type, name: o.name, role: m.role, isTest: o.is_test === true }] : [];
   });
 
 /** The user's activities. The identity check and the memberships read run in parallel (one round trip instead of two). */
@@ -18,7 +18,7 @@ export async function getMyOrgs(): Promise<Org[]> {
   const sb = await getSupabase();
   const [{ data: auth }, { data }] = await Promise.all([
     sb.auth.getUser(),
-    sb.from("memberships").select("user_id, role, created_at, organizations(id, type, name)").order("created_at"),
+    sb.from("memberships").select("user_id, role, created_at, organizations(id, type, name, is_test)").order("created_at"),
   ]);
   if (!auth.user) return [];
   return toOrgs(data as MemberRow[] | null, auth.user.id);

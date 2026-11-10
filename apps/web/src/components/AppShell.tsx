@@ -46,7 +46,7 @@ export function AppShell({ ctx, active, children, path }: { ctx: Ctx; active: Na
         <header className="app-top">
           <Logo href={`/app${q}`} />
           <details className="switcher">
-            <summary><span className="nm">{org.name}</span> <span className="badge">{t.common.orgType[org.type]}</span></summary>
+            <summary><span className="nm">{org.name}</span> <span className="badge">{t.common.orgType[org.type]}</span>{org.isTest && <span className="badge badge-warn">{t.common.testAccount}</span>}</summary>
             <div className="menu">
               {orgs.filter((o) => o.id !== org.id).map((o) => (
                 <Link key={o.id} href={`/app?org=${o.id}`}><span>{o.name}</span><span className="badge">{t.common.orgType[o.type]}</span></Link>
