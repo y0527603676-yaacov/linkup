@@ -50,3 +50,42 @@ Neither migration is applied to production. `invoicing_tax_approved` stays `fals
   - Planning is refused until counsel sets `wind_down_notice_days`.
 - **Settlements awaiting accounting decisions:** while `reward_settlement_approved` is `false`, no offset is taken on payment requests and no cash reward transfer is possible. Rewards stay in the balance.
 - **Legal text correction pending for v1.1:** see `docs/legal/NEXT_VERSION_CORRECTIONS.md` (Google Fonts sentence).
+
+## Creator settlement (migration `20261111100500_creator_settlement.sql`)
+
+Each store keeps its own payment provider. There is no split at sale time, and LINKUP never holds or moves creator money.
+
+- **Balance:** outstanding = approved commission − payments the store reported (excluding withdrawn reports). A negative balance is a credit to the store and is never shown as money to pay.
+- **Due date:** approval date of the oldest uncovered approved amount (first in, first out) + 14 days. Statuses: due soon, overdue.
+- **Reporting a payment:**
+  - Partial payments are allowed; a report can never exceed the outstanding amount.
+  - Each form submission is idempotent, so a double click records one payment.
+  - VAT paid on top is recorded separately.
+  - The store can attach a proof (PDF or image, up to 2 MB).
+- **Status flow:**
+  - "Store reported a payment" → "Creator confirmed receipt", or "Reported not received" with a reason.
+  - The store can answer a dispute. A disputed report can still be confirmed later.
+  - A report made by mistake is withdrawn, never deleted.
+- **Creator payment details:**
+  - Readable only through audited functions; there is no table access.
+  - A store sees them only while there is an outstanding balance in a real collaboration.
+- **Statement / payment request:** the same data for both sides, labelled "not a tax document", printable, with a CSV export. The tax-document note depends on the creator's verified classification.
+- **Reminders:** `creator_payment_reminders()` notifies both sides when a payment is due soon or overdue. It is idempotent and runs inside the billing worker.
+
+## Automatic collection of the LINKUP fee (migration `20261111100600_billing_automation.sql` + `apps/web/src/lib/payments`)
+
+- **Provider-neutral layer:** `PaymentProvider` (hosted card page → token, charge, refund, webhook) and `DocumentProvider` (tax invoice-receipt, credit note).
+  - Simulated adapters are used for development.
+  - The Morning adapter is a guarded stub that throws until it is connected.
+- **Store:**
+  - Saves a payment method once (token plus masked card) with an explicit authorisation. The authorisation wording is pending legal review.
+  - Chooses when to charge: N days after verified delivery (0–14), or on the due date. The contractual due date stays delivery + 14 days.
+- **Database rules:** schedule → claim (skip locked) → complete. Retries follow `collection_retry_days` (default [2, 5]); a final failure becomes an exception.
+  - An open dispute blocks automatic charging of that request.
+  - Manual "paid" cancels a waiting charge.
+  - Removing the card cancels charges that have not started.
+  - Refunds lead to a credit note.
+  - Webhook events are stored once.
+- **Master switch:** while `auto_collection_enabled` is false, nothing is scheduled or charged. `billing_provider` is `simulated`.
+- **Worker:** `POST /api/billing/run`, which requires `BILLING_CRON_SECRET` and `SUPABASE_SERVICE_ROLE_KEY` in server env. Webhooks arrive at `/api/billing/webhook/<provider>`. The simulated card page appears only when `BILLING_SIMULATION=true`.
+- **Owner:** finance dashboard (`finance_dashboard()`) and a single exceptions queue (`billing_exceptions()`) with suggested actions (retry charge, refund).

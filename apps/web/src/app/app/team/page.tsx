@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { ChoiceButton } from "@/components/ChoiceButton";
 import { AppShell, PageHead, Alert } from "@/components/AppShell";
 import { CopyButton } from "@/components/CopyButton";
 import { loadApp } from "@/lib/orgs";
@@ -39,8 +40,8 @@ export default async function Team({ searchParams }: { searchParams: Promise<Rec
                 <select name="role" defaultValue={m.role} aria-label={l.role} style={{ width: "auto" }}>
                   {["owner", "admin", "member"].map((r) => <option key={r} value={r}>{l.roles[r]}</option>)}
                 </select>
-                <button className="btn btn-ghost btn-sm" name="op" value="role">{t.common.save}</button>
-                <button className="btn btn-danger btn-sm" name="op" value="remove">{l.remove}</button>
+                <ChoiceButton className="btn btn-ghost btn-sm" name="op" value="role">{t.common.save}</ChoiceButton>
+                <ChoiceButton className="btn btn-danger btn-sm" name="op" value="remove">{l.remove}</ChoiceButton>
               </form>
             )}
           </div>
@@ -55,7 +56,7 @@ export default async function Team({ searchParams }: { searchParams: Promise<Rec
                 <div className="grow"><div className="title ltr">{i.email}</div><div className="meta">{l.roles[i.role]}</div></div>
                 <span className="row"><CopyButton text={`${origin}/team/${i.token}`} label={t.common.copy} done={t.common.copied} />
                   <form action={teamAction}><input type="hidden" name="org" value={org.id} /><input type="hidden" name="id" value={i.id} />
-                    <button className="btn btn-danger btn-sm" name="op" value="revoke">{l.revoke}</button></form></span>
+                    <ChoiceButton className="btn btn-danger btn-sm" name="op" value="revoke">{l.revoke}</ChoiceButton></form></span>
               </div>
             ))}
           </div>

@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { ChoiceButton } from "@/components/ChoiceButton";
 import { AppShell, PageHead, Alert, Stat } from "@/components/AppShell";
 import { loadApp } from "@/lib/orgs";
 import { errorText, money, shortDate } from "@/lib/format";
@@ -12,7 +13,10 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
   const a = t.admin;
   const [{ data }, { data: ai }, { data: ld }, { data: cm }] = await Promise.all([sb.rpc("admin_overview"), sb.rpc("admin_invoices"),
     sb.rpc("legal_admin_documents"), sb.rpc("admin_contact_messages")]);
-  const { data: fn } = await sb.rpc("admin_fee_notices");
+  const [{ data: fn }, { data: fd }, { data: exq }] = await Promise.all([sb.rpc("admin_fee_notices"), sb.rpc("finance_dashboard"), sb.rpc("billing_exceptions")]);
+  const F = (fd ?? {}) as Record<string, any>;
+  const exceptions = (exq ?? []) as any[];
+  const bl = t.billing;
   const notices = (fn ?? []) as any[];
   const settings = ((data as any)?.settings ?? {}) as Record<string, any>;   // all settings, from admin_overview
   const legalDocs = (ld ?? []) as any[];
@@ -55,6 +59,36 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
         </section>
       )}
 
+      <section className="section"><H>{bl.finance}</H>
+        {!F.auto_enabled && <p className="small muted">{bl.off}</p>}
+        <div className="stats">
+          <Stat label={bl.stats.accrued} value={money(F.fees_accrued_month_minor, "ILS", locale)} />
+          <Stat label={bl.stats.open} value={money(F.requests_open_minor, "ILS", locale)} />
+          <Stat label={bl.stats.overdue} value={money(F.requests_overdue_minor, "ILS", locale)} />
+          <Stat money label={bl.stats.collected} value={money(F.collected_month_minor, "ILS", locale)} />
+          <Stat label={bl.stats.auto} value={money(F.auto_collected_month_minor, "ILS", locale)} />
+          <Stat label={bl.stats.vat} value={money(F.vat_month_minor, "ILS", locale)} />
+          <Stat label={bl.stats.refunds} value={money(F.refunds_month_minor, "ILS", locale)} />
+          <Stat label={bl.stats.failed} value={F.charges_failed_final ?? 0} />
+          <Stat label={bl.stats.methods} value={F.stores_with_method ?? 0} />
+          <Stat label={bl.stats.rewards} value={money(F.rewards_liability_minor, "ILS", locale)} />
+          <Stat label={bl.stats.creatorsDue} value={money(F.creator_outstanding_minor, "ILS", locale)} />
+          <Stat label={bl.stats.creatorsOverdue} value={F.creator_overdue_pairs ?? 0} />
+        </div>
+      </section>
+
+      <section className="section"><H>{bl.exceptions}</H>
+        {exceptions.length === 0 ? <p className="empty">{bl.noExceptions}</p> : (
+          <div className="list">{exceptions.map((x, k) => (
+            <div className="item" key={k}>
+              <div className="grow"><div className="title"><span className="badge badge-warn">{bl.exKinds[x.kind] ?? x.kind}</span> {x.org}</div>
+                <div className="meta">{x.detail ?? ""}{x.since ? ` · ${shortDate(x.since, locale)}` : ""}</div></div>
+              {x.action === "retry" && <form action={adminAction}>{hidden}<input type="hidden" name="op" value="retry" /><input type="hidden" name="id" value={x.ref} />
+                <button className="btn btn-ghost btn-sm">{bl.retry}</button></form>}
+            </div>))}</div>
+        )}
+      </section>
+
       <section className="section"><H>{a.invoices}</H>
         {!A.tax_approved && <Alert kind="warn" text={a.gated} />}
         {settings.reward_settlement_approved !== true && <Alert kind="warn" text={a.settlementGated} />}
@@ -89,6 +123,15 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
               <div className="small muted">{i.delivered_at ? `${a.deliveredAt}: ${shortDate(i.delivered_at, locale)} (${i.delivery_method}) · ${a.dueAt}: ${shortDate(i.due_at, locale)}` : a.awaiting}{i.paid_reference ? ` · ${i.paid_reference}` : ""}</div>
               {(i.documents ?? []).length > 0 && <div className="small">{(i.documents as any[]).map((x, k) => <div key={k}>{a.issuers[x.issuer]} · {a.docTypes[x.type]} {x.number} · {x.date}</div>)}</div>}
               {(i.lines ?? []).length > 0 && <div className="small muted ltr">{(i.lines as any[]).map((ln) => `${pct(ln.rate_bps)} × ${money(ln.base_minor, i.currency, locale)}`).join(" · ")}</div>}
+              {(i.charges ?? []).map((c: any) => (
+                <div key={c.id} className="small row" style={{ gap: 8, flexWrap: "wrap" }}>
+                  <span>#{c.attempt} · {c.status === "scheduled" ? bl.charges.scheduled(shortDate(c.scheduled_for, locale)) : bl.charges[c.status]}{c.failure_message ? ` · ${c.failure_message}` : ""}{Number(c.refunded_minor) ? ` · ${bl.refund} ${money(c.refunded_minor, i.currency, locale)}` : ""}</span>
+                  {c.status === "succeeded" && Number(c.refunded_minor) < Number(c.amount_minor) && (
+                    <details><summary>{bl.refund}</summary>
+                      <form action={adminAction} className="row" style={{ gap: 6, flexWrap: "wrap" }}>{hidden}<input type="hidden" name="op" value="refund" /><input type="hidden" name="id" value={c.id} />
+                        <input name="amount" inputMode="decimal" required placeholder="₪" style={{ width: 80 }} dir="ltr" /><input name="reason" required placeholder={bl.refundReason} style={{ width: 160 }} />
+                        <button className="btn btn-ghost btn-sm">{bl.refund}</button></form></details>)}
+                </div>))}
               {(i.disputes ?? []).map((x: any) => (
                 <div key={x.id} className="small alert alert-warn" style={{ margin: "6px 0" }}>
                   {a.disputes}: {money(x.disputed_minor, i.currency, locale)} · {x.reason}{x.evidence ? ` · ${x.evidence}` : ""}
@@ -105,8 +148,8 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
               {i.status === "issued" && (
                 <form action={adminAction} className="row" style={{ marginTop: 8 }}>{hidden}<input type="hidden" name="id" value={i.id} />
                   <input name="reference" placeholder={t.money.reference} style={{ width: 130 }} />
-                  <button className="btn btn-primary btn-sm" name="op" value="paid">{a.markPaid}</button>
-                  {!i.delivered_at && <button className="btn btn-danger btn-sm" name="op" value="void">{a.void}</button>}</form>)}
+                  <ChoiceButton className="btn btn-primary btn-sm" name="op" value="paid">{a.markPaid}</ChoiceButton>
+                  {!i.delivered_at && <ChoiceButton className="btn btn-danger btn-sm" name="op" value="void">{a.void}</ChoiceButton>}</form>)}
               {i.status !== "void" && (
                 <details style={{ marginTop: 8 }}><summary className="small">{a.recordDoc}</summary>
                   <form action={adminAction} className="row" style={{ marginTop: 8, flexWrap: "wrap" }}>{hidden}<input type="hidden" name="op" value="doc" /><input type="hidden" name="invoice" value={i.id} />
@@ -142,8 +185,8 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
               {n.status === "declined" && (n.wind_down ? (
                 <form action={adminAction} className="row">{hidden}<input type="hidden" name="id" value={n.wind_down.id} />
                   <span>{a.planWindDown}: {shortDate(n.wind_down.end_at, locale)} · {n.wind_down.status}</span>
-                  {n.wind_down.status === "planned" && <><button className="btn btn-ghost btn-sm" name="op" value="wd_complete">{a.complete}</button>
-                    <button className="btn btn-ghost btn-sm" name="op" value="wd_cancel">{a.cancel}</button></>}</form>
+                  {n.wind_down.status === "planned" && <><ChoiceButton className="btn btn-ghost btn-sm" name="op" value="wd_complete">{a.complete}</ChoiceButton>
+                    <ChoiceButton className="btn btn-ghost btn-sm" name="op" value="wd_cancel">{a.cancel}</ChoiceButton></>}</form>
               ) : settings.wind_down_notice_days == null ? <p className="alert alert-warn" style={{ margin: 0 }}>{a.windDownUndecided}</p> : (
                 <form action={adminAction} className="row" style={{ flexWrap: "wrap" }}>{hidden}<input type="hidden" name="op" value="wd_plan" /><input type="hidden" name="term" value={n.term_id} />
                   <input type="date" name="end" required style={{ width: "auto" }} /><input name="note" required placeholder={a.note} style={{ flex: 1, minWidth: 140 }} />
@@ -208,7 +251,7 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
                 <input name="doc_number" required placeholder={a.docNumber} style={{ width: 100 }} /><input type="date" name="doc_date" required style={{ width: "auto" }} />
                 <input name="withholding" inputMode="decimal" placeholder={a.withholding} style={{ width: 170 }} />
                 <input name="reference" placeholder={t.money.reference} style={{ width: 110 }} />
-                <button className="btn btn-ghost btn-sm" name="op" value="transfer">{a.transfer}</button></form></div>))}</div>
+                <ChoiceButton className="btn btn-ghost btn-sm" name="op" value="transfer">{a.transfer}</ChoiceButton></form></div>))}</div>
         </section>
       )}
 

@@ -1,9 +1,11 @@
 import { AppShell, PageHead, Alert } from "@/components/AppShell";
+import { ChoiceButton } from "@/components/ChoiceButton";
 import { loadApp } from "@/lib/orgs";
 import { errorText, money, shortDate } from "@/lib/format";
-import { recordPayout, respondPayout, respondFee, disputeInvoice } from "../actions";
+import { respondFee, disputeInvoice } from "../actions";
+import { Settlement, type PairBal, type Payout } from "./Settlement";
+import { BillingCard } from "./BillingCard";
 
-type Bal = { other_org_id: string; other_name: string; currency: string; pending_minor: number | null; approved_unpaid_minor: number; paid_minor: number; due_at: string | null; overdue: boolean; oldest_unpaid_approved_at: string | null };
 type Term = { id: string; kind: string; fee_bps: number; effective_from: string | null; effective_until: string | null; status: string; delivered_at?: string | null; starts_at?: string | null };
 const pct = (bps: number) => `${(bps / 100).toLocaleString("en", { maximumFractionDigits: 2 })}%`;
 
@@ -15,8 +17,8 @@ export default async function Money({ searchParams }: { searchParams: Promise<Re
   const isStore = org.type === "store";
   const [{ data: bal }, { data: payouts }, { data: invoices }, { data: fee }] = await Promise.all([
     sb.rpc("payout_balances", { p_org: org.id }),
-    sb.from("creator_payouts").select("id, store_org_id, creator_org_id, amount_minor, currency, method, reference, paid_at, creator_status")
-      .eq(isStore ? "store_org_id" : "creator_org_id", org.id).order("paid_at", { ascending: false }).limit(30),
+    sb.from("creator_payouts").select("id, store_org_id, creator_org_id, amount_minor, vat_minor, currency, method, reference, paid_on, paid_at, creator_status, withdrawn_at, dispute_reason, store_response, withdraw_note")
+      .eq(isStore ? "store_org_id" : "creator_org_id", org.id).order("paid_at", { ascending: false }).limit(50),
     isStore && status.is_admin ? sb.from("invoices").select("*").eq("store_org_id", org.id).neq("status", "void").order("period_start", { ascending: false }).limit(24) : Promise.resolve({ data: [] as any[] }),
     isStore && status.is_admin ? sb.rpc("store_fee_terms", { p_store: org.id }) : Promise.resolve({ data: null }),
   ]);
@@ -29,12 +31,13 @@ export default async function Money({ searchParams }: { searchParams: Promise<Re
     invIds.length ? sb.from("invoice_disputes").select("*").in("invoice_id", invIds).order("created_at") : Promise.resolve({ data: [] as any[] }),
   ]);
   const lines = Object.fromEntries(linesArr);
+  const [{ data: details }, { data: billing }] = await Promise.all([
+    !isStore && status.is_admin ? sb.rpc("my_payout_details", { p_org: org.id }) : Promise.resolve({ data: null }),
+    isAdminStore ? sb.rpc("my_billing", { p_store: org.id }) : Promise.resolve({ data: null }),
+  ]);
   const disputesBy = ((disputes ?? []) as any[]).reduce<Record<string, any[]>>((acc, x) => { (acc[x.invoice_id] ??= []).push(x); return acc; }, {});
   const now = Date.now();
   const d = (x: string | null) => (x ? shortDate(x, locale) : "");
-  const balances = (bal ?? []) as Bal[];
-  const names = Object.fromEntries(balances.map((b) => [b.other_org_id, b.other_name]));
-  const methods = Object.entries(m.methods);
   return (
     <AppShell ctx={ctx} active="money" path="/app/money">
       <PageHead title={m.title} lead={isStore ? m.storeLead : m.creatorLead} />
@@ -59,8 +62,8 @@ export default async function Money({ searchParams }: { searchParams: Promise<Re
                 <input type="hidden" name="org" value={org.id} /><input type="hidden" name="term" value={x.id} />
                 <span>{t.lc.rate(pct((fee as any).current_bps ?? 0), pct(x.fee_bps), d(x.starts_at ?? x.effective_from))}</span>
                 {x.delivered_at ? (
-                  <div className="row" style={{ flexWrap: "wrap" }}><button className="btn btn-primary btn-sm" name="accept" value="1">{t.lc.rateAccept}</button>
-                    <button className="btn btn-ghost btn-sm" name="accept" value="0">{t.lc.rateDecline}</button></div>
+                  <div className="row" style={{ flexWrap: "wrap" }}><ChoiceButton className="btn btn-primary btn-sm" name="accept" value="1">{t.lc.rateAccept}</ChoiceButton>
+                    <ChoiceButton className="btn btn-ghost btn-sm" name="accept" value="0">{t.lc.rateDecline}</ChoiceButton></div>
                 ) : <span className="small muted">{m.noticePending}</span>}
               </form>
             ))}
@@ -68,59 +71,10 @@ export default async function Money({ searchParams }: { searchParams: Promise<Re
         </section>
       )}
 
-      <section className="section">
-        <div className="section-head"><h2>{isStore ? m.toPartners : m.byStore}</h2></div>
-        {balances.length === 0 ? <p className="empty">{m.nothing}</p> : (
-          <div className="stack">
-            {balances.map((b) => (
-              <div className="card card-flat" key={b.other_org_id + b.currency}>
-                <div className="row between"><b>{b.other_name}</b>
-                  <span className="row small"><span className="muted">{m.pending}: {money(b.pending_minor ?? 0, b.currency, locale)}</span>
-                    <span className="badge badge-money">{m.approvedUnpaid}: {money(b.approved_unpaid_minor, b.currency, locale)}</span>
-                    <span className="muted">{m.paid}: {money(b.paid_minor, b.currency, locale)}</span></span></div>
-                {b.due_at && (
-                  <div className="row small" style={{ marginTop: 6, flexWrap: "wrap" }}>
-                    {b.oldest_unpaid_approved_at && <span className="muted">{t.lc.approved(shortDate(b.oldest_unpaid_approved_at, locale))}</span>}
-                    {b.overdue && <span className="badge badge-warn">{m.overdue}</span>}
-                  </div>
-                )}
-                {isStore && status.is_admin && Number(b.approved_unpaid_minor) > 0 && (
-                  <form action={recordPayout} className="row" style={{ marginTop: 12 }}>
-                    <input type="hidden" name="org" value={org.id} /><input type="hidden" name="creator" value={b.other_org_id} /><input type="hidden" name="currency" value={b.currency} />
-                    <select name="method" aria-label={m.method} style={{ width: "auto" }}>{methods.map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
-                    <input name="reference" placeholder={m.reference} maxLength={120} style={{ flex: 1, minWidth: 120 }} />
-                    <button className="btn btn-primary btn-sm">{m.markPaid} · {money(b.approved_unpaid_minor, b.currency, locale)}</button>
-                  </form>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-        <p className="small muted" style={{ marginTop: 8 }}>{t.lc.pending}</p>
-        <p className="small muted">{t.lc.tax}</p>
-      </section>
+      <Settlement t={t} locale={locale} orgId={org.id} isStore={isStore} isAdmin={status.is_admin} balances={(bal ?? []) as PairBal[]}
+        payouts={(payouts ?? []) as Payout[]} details={details} />
 
-      {(payouts ?? []).length > 0 && (
-        <section className="section">
-          <div className="section-head"><h2>{m.payouts}</h2></div>
-          <div className="list">
-            {(payouts ?? []).map((p) => (
-              <div className="item" key={p.id}>
-                <div className="grow"><div className="title">{names[isStore ? p.creator_org_id : p.store_org_id] ?? "—"}</div>
-                  <div className="meta">{shortDate(p.paid_at, locale)} · {m.methods[p.method]}{p.reference ? ` · ${p.reference}` : ""}</div></div>
-                <span className="amount">{money(p.amount_minor, p.currency, locale)}</span>
-                {p.creator_status === "awaiting" && !isStore && status.is_admin ? (
-                  <form action={respondPayout} className="row"><input type="hidden" name="org" value={org.id} /><input type="hidden" name="id" value={p.id} />
-                    <span className="small">{t.lc.reported}</span>
-                    <button className="btn btn-primary btn-sm" name="confirm" value="1">{t.lc.received}</button>
-                    <button className="btn btn-ghost btn-sm" name="confirm" value="0">{t.lc.notReceived}</button></form>
-                ) : <span className={`badge ${p.creator_status === "confirmed" ? "badge-money" : p.creator_status === "disputed" ? "badge-warn" : ""}`}>
-                    {p.creator_status === "confirmed" ? m.confirmed : p.creator_status === "disputed" ? m.disputed : m.awaiting}</span>}
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
+      {isAdminStore && billing && <BillingCard t={t} locale={locale} orgId={org.id} billing={billing as any} />}
 
       {isStore && status.is_admin && (
         <section className="section">

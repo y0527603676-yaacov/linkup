@@ -1,4 +1,5 @@
 import { AppShell, PageHead, Alert } from "@/components/AppShell";
+import { ChoiceButton } from "@/components/ChoiceButton";
 import { loadApp } from "@/lib/orgs";
 import { errorText, pct, shortDate } from "@/lib/format";
 import { saveOffer, createCampaign, setOpportunityStatus } from "../actions";
@@ -60,8 +61,8 @@ export default async function Offer({ searchParams }: { searchParams: Promise<Re
         <p className="small muted">{o.termsNote}</p>
         {!ro && (
           <div className="row">
-            <button className="btn btn-primary" name="status" value="live">{o.publish}</button>
-            {standing?.status === "live" && <button className="btn btn-ghost" name="status" value="paused">{o.pause}</button>}
+            <ChoiceButton className="btn btn-primary" name="status" value="live">{o.publish}</ChoiceButton>
+            {standing?.status === "live" && <ChoiceButton className="btn btn-ghost" name="status" value="paused">{o.pause}</ChoiceButton>}
           </div>
         )}
       </form>
@@ -76,7 +77,7 @@ export default async function Offer({ searchParams }: { searchParams: Promise<Re
                 <div className="grow"><div className="title">{c.title} <span className="badge badge-accent">{pct(c.commission_bps, locale)}</span></div>
                   <div className="meta">{shortDate(c.starts_at, locale)} – {shortDate(c.ends_at, locale)} · {o.participants}: {count(c.id)}</div></div>
                 {!ro && <form action={setOpportunityStatus}><input type="hidden" name="org" value={org.id} /><input type="hidden" name="id" value={c.id} />
-                  <button className="btn btn-danger btn-sm" name="status" value="ended">{o.end}</button></form>}
+                  <ChoiceButton className="btn btn-danger btn-sm" name="status" value="ended">{o.end}</ChoiceButton></form>}
               </div>
             ))}
           </div>

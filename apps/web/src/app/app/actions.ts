@@ -162,21 +162,77 @@ export async function decideApplication(form: FormData) {
 }
 
 /* ---------- Payments ---------- */
-export async function recordPayout(form: FormData) {
-  const org = str(form, "org");
-  const sb = await getSupabase();
-  const { error } = await sb.rpc("record_creator_payout", {
-    p_store: org, p_creator: str(form, "creator"), p_method: str(form, "method") || "bank_transfer",
-    p_reference: str(form, "reference") || null, p_currency: str(form, "currency") || "ILS",
-  });
-  redirect(back("/app/money", org, error ? { error: errorCode(error) } : { ok: "paid" }));
-}
-
 export async function respondPayout(form: FormData) {
   const org = str(form, "org");
   const sb = await getSupabase();
-  const { error } = await sb.rpc("respond_creator_payout", { p_payout: str(form, "id"), p_confirm: str(form, "confirm") === "1" });
-  redirect(back("/app/money", org, error ? { error: errorCode(error) } : {}));
+  const { error } = await sb.rpc("respond_creator_payout", { p_payout: str(form, "id"), p_confirm: str(form, "confirm") === "1", p_reason: str(form, "reason") || null });
+  redirect(back("/app/money", org, error ? { error: errorCode(error) } : { ok: "1" }));
+}
+
+export async function answerDispute(form: FormData) {
+  const org = str(form, "org");
+  const sb = await getSupabase();
+  const { error } = await sb.rpc("answer_payout_dispute", { p_payout: str(form, "id"), p_response: str(form, "response") });
+  redirect(back("/app/money", org, error ? { error: errorCode(error) } : { ok: "1" }));
+}
+
+export async function withdrawPayout(form: FormData) {
+  const org = str(form, "org");
+  const sb = await getSupabase();
+  const { error } = await sb.rpc("withdraw_creator_payout", { p_payout: str(form, "id"), p_note: str(form, "note") });
+  redirect(back("/app/money", org, error ? { error: errorCode(error) } : { ok: "1" }));
+}
+
+/* Store reports a payment it made to a creator (LINKUP moves no money). Idempotent per form render. */
+export async function reportPayment(form: FormData) {
+  const org = str(form, "org");
+  const creator = str(form, "creator");
+  const sb = await getSupabase();
+  const { data, error } = await sb.rpc("report_creator_payment", {
+    p_store: org, p_creator: creator, p_amount_minor: pctToBps(str(form, "amount"), -1), p_vat_minor: pctToBps(str(form, "vat") || "0", 0),
+    p_method: str(form, "method") || "bank_transfer", p_paid_on: str(form, "paid_on") || null, p_reference: str(form, "reference") || null,
+    p_idempotency_key: str(form, "key") || null,
+  });
+  if (error) redirect(back("/app/money/pay", org, { creator, error: errorCode(error) }));
+  const file = form.get("proof");
+  if (file instanceof File && file.size > 0) {
+    if (file.size > 2 * 1024 * 1024) redirect(back("/app/money", org, { error: "invalid_input" }));
+    const b64 = Buffer.from(await file.arrayBuffer()).toString("base64");
+    const { error: pe } = await sb.rpc("attach_payout_proof", { p_payout: (data as { payout_id: string }).payout_id, p_filename: file.name, p_mime: file.type, p_base64: b64 });
+    if (pe) redirect(back("/app/money", org, { error: errorCode(pe) }));
+  }
+  redirect(back("/app/money", org, { ok: "reported" }));
+}
+
+export async function savePayoutDetails(form: FormData) {
+  const org = str(form, "org");
+  const sb = await getSupabase();
+  const { error } = await sb.rpc("save_payout_details", { p_org: org, p_method: str(form, "method"), p_holder: str(form, "holder") || null,
+    p_bank: str(form, "bank") || null, p_branch: str(form, "branch") || null, p_account: str(form, "account") || null,
+    p_phone: str(form, "phone") || null, p_link: str(form, "link") || null, p_note: null });
+  redirect(back("/app/money", org, error ? { error: errorCode(error) } : { ok: "1" }));
+}
+
+/* ---------- LINKUP fee: payment method (simulated provider in development only) ---------- */
+export async function saveSimulatedMethod(form: FormData) {
+  const org = str(form, "org");
+  if (process.env.BILLING_SIMULATION !== "true") redirect(back("/app/money", org, { error: "forbidden" }));
+  const sb = await getSupabase();
+  const card = str(form, "card");
+  const token = `${card === "flaky" ? "sim_flaky" : card === "decline" ? "sim_decline" : "sim_ok"}_${crypto.randomUUID().slice(0, 8)}`;
+  const timing = str(form, "timing") === "on_due_date" ? "on_due_date" : "days_after_delivery";
+  const { error } = await sb.rpc("save_payment_method", { p_store: org, p_provider: "simulated", p_token_ref: token, p_brand: "visa",
+    p_last4: card === "decline" ? "0002" : card === "flaky" ? "0341" : "4242", p_exp_month: 12, p_exp_year: 2030,
+    p_charge_timing: timing, p_charge_days: timing === "on_due_date" ? null : Math.max(0, Math.min(14, Number(str(form, "days")) || 0)),
+    p_authorization_version: str(form, "agree") === "1" ? "billing-auth-draft-1" : "" });
+  redirect(back("/app/money", org, error ? { error: errorCode(error) } : { ok: "1" }));
+}
+
+export async function removePaymentMethod(form: FormData) {
+  const org = str(form, "org");
+  const sb = await getSupabase();
+  const { error } = await sb.rpc("remove_payment_method", { p_store: org });
+  redirect(back("/app/money", org, error ? { error: errorCode(error) } : { ok: "1" }));
 }
 
 /* ---------- Team ---------- */
@@ -237,6 +293,8 @@ export async function adminAction(form: FormData) {
         p_withholding_minor: pctToBps(str(form, "withholding") || "0", 0) })
     : op === "resolve" ? await sb.rpc("resolve_invoice_dispute", { p_dispute: str(form, "id"), p_resolution: str(form, "resolution") })
     : op === "contact" ? await sb.rpc("mark_contact_handled", { p_id: str(form, "id") })
+    : op === "retry" ? await sb.rpc("retry_charge_now", { p_invoice: str(form, "id") })
+    : op === "refund" ? await sb.rpc("request_refund", { p_charge: str(form, "id"), p_amount_minor: pctToBps(str(form, "amount"), -1), p_reason: str(form, "reason") })
     : op === "notice" ? await sb.rpc("record_fee_notice", { p_term: str(form, "term"), p_event: str(form, "event"), p_channel: str(form, "channel"),
         p_recipient: str(form, "recipient") || null, p_reference: str(form, "reference") || null, p_occurred_at: str(form, "at") ? new Date(str(form, "at")).toISOString() : null })
     : op === "wd_plan" ? await sb.rpc("plan_collaboration_wind_down", { p_term: str(form, "term"), p_end_at: new Date(str(form, "end")).toISOString(), p_note: str(form, "note") })

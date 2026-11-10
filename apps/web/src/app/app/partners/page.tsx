@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ChoiceButton } from "@/components/ChoiceButton";
 import { AppShell, PageHead, Alert } from "@/components/AppShell";
 import { loadApp } from "@/lib/orgs";
 import { errorText, pct, shortDate } from "@/lib/format";
@@ -32,8 +33,8 @@ export default async function Partners({ searchParams }: { searchParams: Promise
                 {status.is_admin && (
                   <form action={decideApplication} className="row">
                     <input type="hidden" name="org" value={org.id} /><input type="hidden" name="id" value={a.id} />
-                    <button className="btn btn-primary btn-sm" name="approve" value="1">{p.approve}</button>
-                    <button className="btn btn-ghost btn-sm" name="approve" value="0">{p.reject}</button>
+                    <ChoiceButton className="btn btn-primary btn-sm" name="approve" value="1">{p.approve}</ChoiceButton>
+                    <ChoiceButton className="btn btn-ghost btn-sm" name="approve" value="0">{p.reject}</ChoiceButton>
                   </form>
                 )}
               </div>
