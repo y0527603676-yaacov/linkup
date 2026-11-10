@@ -99,7 +99,7 @@ const newKey = async () => {
 };
 
 beforeAll(async () => {
-  const up = await fetch(SITE).catch(() => null);
+  const up = await fetch(SITE).then(async (r) => { await r.arrayBuffer(); return r; }).catch(() => null);
   if (!up) throw new Error(`The isolated WordPress test site is not running at ${SITE} (see tests/e2e-wp/README.md)`);
   db = await createDb();
   endpoint = startEndpoint();
@@ -177,7 +177,7 @@ describe("one approval → installed, activated, configured, access revoked", ()
 describe("visitor through a creator link → purchase 7 days later → attributed", () => {
   let cookie = "";
   it("the link sets a first-party 30-day cookie on the store's own domain", async () => {
-    const res = await fetch(`${SITE}/?lku=${code}`, { redirect: "manual" });
+    const res = await fetch(`${SITE}/?lku=${code}`, { redirect: "manual" }); await res.arrayBuffer();
     const sc = res.headers.get("set-cookie") ?? "";
     expect(sc).toMatch(new RegExp(`linkup_ref=${code}%7C\\d+`));
     expect(sc).toMatch(/HttpOnly/i); expect(sc).toMatch(/SameSite=Lax/i);
@@ -203,7 +203,7 @@ describe("visitor through a creator link → purchase 7 days later → attribute
 describe("visitor consent", () => {
   it("store chose 'only after consent' and the site has no consent banner integration → no cookie is set; coupons still work", async () => {
     await testState({ consent_mode: "require" });
-    const res = await fetch(`${SITE}/?lku=${code}`, { redirect: "manual" });
+    const res = await fetch(`${SITE}/?lku=${code}`, { redirect: "manual" }); await res.arrayBuffer();
     expect(res.headers.get("set-cookie") ?? "").not.toMatch(/linkup_ref=/);
     await testState({ consent_mode: "notice" });
   });
@@ -229,7 +229,7 @@ describe("disconnect and removal", () => {
     expect(s.coupons).toContainEqual(expect.objectContaining({ code, status: "draft" }));
     // a new order after disconnect is not sent anywhere
     const n = endpointCalls.length;
-    await fetch(`${SITE}/wp-json/linkup-test/v1/checkout`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    await fetch(`${SITE}/wp-json/linkup-test/v1/checkout`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }).then((r) => r.arrayBuffer());
     expect(endpointCalls.length).toBe(n);
     const kept = await db.as<any>({ role: "owner" }, `select count(*)::int n from orders where connection_id = $1`, [conn]);
     expect(kept[0].n).toBe(1);
@@ -242,14 +242,14 @@ describe("disconnect and removal", () => {
     const c = await approveInWordPress(ADMIN, st);
     const auth = { authorization: `Basic ${btoa(`${c.user}:${c.password}`)}`, "content-type": "application/json" };
     const base = `${SITE}/wp-json/wp/v2/plugins/linkup-connector/linkup-connector`;
-    expect((await fetch(base, { method: "POST", headers: auth, body: JSON.stringify({ status: "inactive" }) })).status).toBe(200);
-    expect((await fetch(base, { method: "DELETE", headers: auth })).status).toBe(200);
+    const deact = await fetch(base, { method: "POST", headers: auth, body: JSON.stringify({ status: "inactive" }) }); await deact.arrayBuffer(); expect(deact.status).toBe(200);
+    const del = await fetch(base, { method: "DELETE", headers: auth }); await del.arrayBuffer(); expect(del.status).toBe(200);
     const s = await wpState();
     expect(s).toMatchObject({ plugin_installed: false, options_left: [] });
     expect(s.coupons.every((x: any) => x.status !== "publish")).toBe(true);   // nothing LINKUP created stays active
     // clean up the password used for this removal step
     const me = await (await fetch(`${SITE}/wp-json/wp/v2/users/me/application-passwords/introspect`, { headers: auth })).json();
-    await fetch(`${SITE}/wp-json/wp/v2/users/me/application-passwords/${me.uuid}`, { method: "DELETE", headers: auth });
+    await fetch(`${SITE}/wp-json/wp/v2/users/me/application-passwords/${me.uuid}`, { method: "DELETE", headers: auth }).then((r) => r.arrayBuffer());
   }, 60_000);
 });
 

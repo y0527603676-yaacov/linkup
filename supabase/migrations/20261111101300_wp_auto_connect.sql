@@ -24,9 +24,15 @@ create table if not exists public.store_install_consents (
 alter table public.store_install_consents enable row level security;
 revoke all on public.store_install_consents from anon, authenticated;
 grant select on public.store_install_consents to authenticated;
-drop policy if exists store_install_consents_read on public.store_install_consents;
-create policy store_install_consents_read on public.store_install_consents for select to authenticated
-  using (public.is_admin(org_id) or public.is_platform_admin());
+-- Created only if missing, so the migration is safe to re-run and removes nothing.
+do $$
+begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'store_install_consents'
+                 and policyname = 'store_install_consents_read') then
+    create policy store_install_consents_read on public.store_install_consents for select to authenticated
+      using (public.is_admin(org_id) or public.is_platform_admin());
+  end if;
+end $$;
 create index if not exists store_install_consents_org_idx on public.store_install_consents(org_id, created_at);
 
 create table if not exists public.wp_connect_requests (
