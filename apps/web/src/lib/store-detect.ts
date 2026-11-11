@@ -205,3 +205,36 @@ export async function detectStore(input: string, opts: { fetcher?: Fetcher; allo
   if (r.platform === "unknown" && home.status >= 400) return { ...r, error: "http_error" };
   return { ...r, ok: true };
 }
+
+/* ---------- WordPress admin check (used only when the owner says "my store is on WooCommerce" but detection was unsure) ---------- */
+/** True only if the address really serves WordPress's login form on the same host (one GET, redirects re-validated).
+ *  A site that answers every path with its own page (e.g. a single-page app showing "404") is NOT WordPress. */
+export async function probeWpAdmin(site: string, opts: { fetcher?: Fetcher; allowHttp?: boolean } = {}): Promise<boolean> {
+  const f = opts.fetcher ?? publicFetch;
+  try {
+    const base = new URL(site);
+    const p = await getFollow(`${base.protocol}//${base.host}/wp-login.php`, f, !!opts.allowHttp);
+    const same = new URL(p.url).host.replace(/^www\./, "") === base.host.replace(/^www\./, "");
+    return same && p.status === 200 && /id=["']loginform["']/i.test(p.body) && /id=["']user_login["']/i.test(p.body);
+  } catch { return false; }
+}
+
+export type Eligibility = {
+  ok: boolean; url: string; detection: Detection;
+  /** How the store was verified: WooCommerce detected, or (owner's choice) a real WordPress admin found at this address. */
+  via?: "woocommerce" | "wp_admin";
+  reason?: "not_woocommerce" | "no_wp_admin" | "redirected" | DetectError;
+};
+
+/** Server-side gate before LINKUP creates a connection key or links to /wp-admin on the store's site. */
+export async function connectEligibility(input: string, opts: { fetcher?: Fetcher; allowHttp?: boolean } = {}): Promise<Eligibility> {
+  const d = await detectStore(input, opts);
+  const url = d.finalUrl || d.url;
+  if (!d.ok) return { ok: false, url, detection: d, reason: d.error ?? "unreachable" };
+  if (d.redirected) return { ok: false, url, detection: d, reason: "redirected" };
+  if (d.platform === "woocommerce") return { ok: true, url, detection: d, via: "woocommerce" };
+  if (d.platform === "unknown") {
+    return (await probeWpAdmin(url, opts)) ? { ok: true, url, detection: d, via: "wp_admin" } : { ok: false, url, detection: d, reason: "no_wp_admin" };
+  }
+  return { ok: false, url, detection: d, reason: "not_woocommerce" };
+}

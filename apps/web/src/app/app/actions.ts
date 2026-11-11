@@ -52,13 +52,19 @@ export async function updateOrg(form: FormData) {
 export type ConnectState = { error?: string; key?: string; site?: string };
 export async function connectStore(_prev: ConnectState, form: FormData): Promise<ConnectState> {
   const sb = await getSupabase();
+  // Never create a key (or show links into /wp-admin) for an address that isn't a verified WooCommerce / WordPress site.
+  const { connectEligibility } = await import("@/lib/store-detect");
+  const { detectOpts } = await import("@/lib/detect-env");
+  const typed = str(form, "site");
+  const el = await connectEligibility(typed, detectOpts(typed));
+  if (!el.ok) return { error: el.reason === "redirected" ? "site_redirects" : el.reason === "timeout" || el.reason === "unreachable" ? "site_unreachable" : "site_not_verified" };
   const legal = form.getAll("legal").map(String).filter(Boolean);
   if (legal.length) {
     if (str(form, "agree") !== "1") return { error: "legal_acceptance_required" };
     const { error: le } = await sb.rpc("accept_legal", { p_doc_keys: legal, p_type: "store_connection", p_org: str(form, "org"), p_locale: await getLocale() });
     if (le) return { error: errorCode(le) };
   }
-  const { data, error } = await sb.rpc("create_store_connection", { p_org: str(form, "org"), p_site_url: str(form, "site") });
+  const { data, error } = await sb.rpc("create_store_connection", { p_org: str(form, "org"), p_site_url: el.url });
   if (error) return { error: errorCode(error) };
   const r = data as { connection_key: string; site_url: string };
   return { key: r.connection_key, site: r.site_url };
@@ -66,27 +72,20 @@ export async function connectStore(_prev: ConnectState, form: FormData): Promise
 
 /* ---------- Store connection without a plugin (WooCommerce approves inside the store) ---------- */
 /* ---------- Store platform check (before any redirect to the store's own site) ---------- */
-function detectionParams(d: import("@/lib/store-detect").Detection): Record<string, string> {
-  const q: Record<string, string> = { site: d.finalUrl || d.url, p: d.platform };
-  if (d.error) q.de = d.error;
-  if (d.redirected) { q.rd = d.url; q.site = d.finalUrl; }
-  if (d.linkupPlugin) q.pl = "1";
-  if (d.restBlocked) q.rb = "1";
-  return q;
-}
+/** The check itself runs on the connect page, on the server, every time. Nothing about the result travels in the
+ *  address, so an edited or old link can never show "WooCommerce found" or unlock a connection path. */
+const checkUrl = (org: string, site: string, extra: Record<string, string> = {}) => back("/app/connect", org, { site, check: "1", ...extra });
 
 export async function detectStoreAction(form: FormData) {
-  const org = str(form, "org");
-  const { detectStore } = await import("@/lib/store-detect");
-  const d = await detectStore(str(form, "site"));
-  redirect(back("/app/connect", org, detectionParams(d)));
+  redirect(checkUrl(str(form, "org"), str(form, "site")));
 }
 
 /** The store must be a reachable WooCommerce site (same host as typed) before LINKUP sends the owner to it. */
 async function requireWooSite(org: string, site: string): Promise<string> {
   const { detectStore } = await import("@/lib/store-detect");
-  const d = await detectStore(site);
-  if (!d.ok || d.platform !== "woocommerce" || d.redirected || d.restBlocked) redirect(back("/app/connect", org, detectionParams(d)));
+  const { detectOpts } = await import("@/lib/detect-env");
+  const d = await detectStore(site, detectOpts(site));
+  if (!d.ok || d.platform !== "woocommerce" || d.redirected || d.restBlocked) redirect(checkUrl(org, site));
   return d.url;
 }
 

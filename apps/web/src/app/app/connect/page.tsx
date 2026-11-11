@@ -5,6 +5,8 @@ import { ConnectForm } from "./ConnectForm";
 import { LegalChecks, type PendingDoc } from "@/components/LegalChecks";
 import { startWooApi, syncWooApi, startWpConnect, disconnectStore, detectStoreAction } from "../actions";
 import { PLUGIN_LISTED } from "@/lib/wp-connect";
+import { detectStore, probeWpAdmin } from "@/lib/store-detect";
+import { detectOpts } from "@/lib/detect-env";
 
 export default async function Connect({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const sp = await searchParams;
@@ -29,22 +31,36 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
   const w = l.wp;
   const f = l.flow;
   const wpResult = sp.wp === "activation_failed" ? "install_failed" : sp.wp;
-  // Detection result (re-checked on the server before any redirect to the store's site)
-  const platform = sp.p ?? "";
-  const step = !!platform || !!sp.de;
+  // Detection runs here, on the server, on every view of a result. The address only carries what to check (site, and
+  // whether the owner chose "my store is on WooCommerce"); a result can never be injected through the link.
+  const checkSite = sp.check === "1" ? (sp.site ?? "").trim() : "";
+  const d = checkSite ? await detectStore(checkSite, detectOpts(checkSite)) : null;
+  const wantManual = sp.manual === "1";
+  // Owner's choice is not proof: the address must really serve WordPress's admin login before we offer the manual path.
+  const adminOk = d && d.ok && !d.redirected && d.platform === "unknown" && wantManual
+    ? await probeWpAdmin(d.finalUrl || d.url, detectOpts(checkSite)) : null;
+  const platform = d && d.ok ? d.platform : "";
+  const step = !!d;
   const retry = sp.retry === "1";
-  const de = sp.de;
-  const dsite = (sp.site ?? site).replace(/\/+$/, "");
-  const pluginReady = sp.pl === "1";
-  const restBlocked = sp.rb === "1";
-  const manualOnly = sp.m === "1" || restBlocked;
+  const de = d && !d.ok ? (d.error ?? "unreachable") : undefined;
+  const rdFrom = d && d.ok && d.redirected ? d.url : undefined;
+  const dsite = (d ? (d.finalUrl || d.url || checkSite) : (sp.site ?? site)).replace(/\/+$/, "");
+  const pluginReady = !!d?.linkupPlugin;
+  const restBlocked = !!d?.restBlocked;
+  const manualOnly = restBlocked;
   const primary: "wp" | "api" | "manual" = manualOnly ? "manual" : wpAvail ? "wp" : api ? "api" : "manual";
+  const Prereqs = () => (
+    <div className="small" style={{ margin: 0 }}>
+      <b>{f.prereqTitle}</b>
+      <ul style={{ margin: "4px 0 0", paddingInlineStart: 18 }}>{f.prereqs.map((x) => <li key={x}>{x}</li>)}</ul>
+    </div>
+  );
   const names: Record<string, string> = { shopify: "Shopify", wix: "Wix", magento: "Magento" };
   const Retry = ({ ghost, again, label }: { ghost?: boolean; again?: boolean; label?: string }) => (
     <div className="row" style={{ gap: 8 }}>
-      {again && <form action={detectStoreAction}><input type="hidden" name="org" value={org.id} /><input type="hidden" name="site" value={sp.rd ?? dsite} />
+      {again && <form action={detectStoreAction}><input type="hidden" name="org" value={org.id} /><input type="hidden" name="site" value={rdFrom ?? dsite} />
         <button className={`btn ${ghost ? "btn-ghost" : "btn-primary"} btn-sm`}>{f.recheck}</button></form>}
-      <a className={`btn btn-ghost btn-sm`} href={`/app/connect?${new URLSearchParams({ org: org.id, retry: "1", site: sp.rd ?? dsite })}`}>{label ?? f.otherSite}</a>
+      <a className={`btn btn-ghost btn-sm`} href={`/app/connect?${new URLSearchParams({ org: org.id, retry: "1", site: rdFrom ?? dsite })}`}>{label ?? f.otherSite}</a>
     </div>
   );
   return (
@@ -90,14 +106,14 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
         {/* Step 2/3 – what we found, and the one matching way to connect */}
         {step && !retry && (
           <section className="card stack connect-step" style={{ marginTop: 8 }}>
-            <ol className="stepper">{f.steps.map((x, i) => <li key={x} className={i <= (de || platform !== "woocommerce" || sp.rd ? 1 : 2) ? "on" : ""}><span>{i + 1}</span>{x}</li>)}</ol>
+            <ol className="stepper">{f.steps.map((x, i) => <li key={x} className={i <= ((platform === "woocommerce" && !rdFrom) || (wantManual && adminOk) ? 2 : 1) ? "on" : ""}><span>{i + 1}</span>{x}</li>)}</ol>
 
             {de ? (
               <>
                 <p className="alert alert-warn" style={{ margin: 0 }}>{f.errors[de] ?? f.errors.unreachable}</p>
                 <Retry again={de === "timeout" || de === "unreachable" || de === "http_error"} />
               </>
-            ) : sp.rd ? (
+            ) : rdFrom ? (
               <>
                 <h2 style={{ margin: 0 }}>{f.redirectTitle}</h2>
                 <p style={{ margin: 0 }}>{f.redirectText.replace("{to}", dsite.replace(/^https:\/\//, ""))}</p>
@@ -170,6 +186,7 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
                   <div className="stack">
                     <h3 style={{ margin: 0 }}>{f.manualTitle}</h3>
                     <p className="small muted" style={{ margin: 0 }}>{f.manualLead}</p>
+                    <Prereqs />
                     <ConnectForm orgId={org.id} l={l} errors={t.errors} defaultSite={dsite} rotate={connected && c?.method === "plugin"}
                       legal={legal} locale={locale} legalLead={t.lc.store} />
                   </div>
@@ -179,6 +196,7 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
                     <summary>{f.otherWay}</summary>
                     <div className="stack" style={{ marginTop: 8 }}>
                       <p className="small muted" style={{ margin: 0 }}>{f.manualLead}</p>
+                      <Prereqs />
                       <ConnectForm orgId={org.id} l={l} errors={t.errors} defaultSite={dsite} rotate={connected && c?.method === "plugin"}
                         legal={legal} locale={locale} legalLead={t.lc.store} />
                     </div>
@@ -198,11 +216,28 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
                 <p style={{ margin: 0 }}>{f.unsupported.d.replace("{p}", names[platform] ?? platform)} <a href="/contact">{l.tellUs}</a></p>
                 <Retry ghost label={f.otherSite} />
               </>
+            ) : wantManual && adminOk ? (
+              <>
+                <p className="alert alert-warn" style={{ margin: 0 }}><b>{f.manualChoice.t}</b> · <span className="ltr">{dsite.replace(/^https?:\/\//, "")}</span><br />{f.manualChoice.verified}</p>
+                <div className="stack">
+                  <h3 style={{ margin: 0 }}>{f.manualTitle}</h3>
+                  <Prereqs />
+                  <ConnectForm orgId={org.id} l={l} errors={t.errors} defaultSite={dsite} rotate={false}
+                    legal={legal} locale={locale} legalLead={t.lc.store} />
+                </div>
+                <Retry ghost label={f.otherSite} />
+              </>
+            ) : wantManual ? (
+              <>
+                <h2 style={{ margin: 0 }}>{f.manualChoice.noAdminT}</h2>
+                <p style={{ margin: 0 }}>{f.manualChoice.notVerified} <a href="/contact">{l.tellUs}</a></p>
+                <Retry ghost again />
+              </>
             ) : (
               <>
                 <h2 style={{ margin: 0 }}>{f.unknown.t}</h2>
                 <p style={{ margin: 0 }}>{f.unknown.d}</p>
-                <a className="btn btn-primary btn-block" href={`/app/connect?${new URLSearchParams({ org: org.id, site: dsite, p: "woocommerce", m: "1" })}`}>{f.unknown.wooYes}</a>
+                <a className="btn btn-primary btn-block" href={`/app/connect?${new URLSearchParams({ org: org.id, site: dsite, check: "1", manual: "1" })}`}>{f.unknown.wooYes}</a>
                 <Retry ghost again />
               </>
             )}
