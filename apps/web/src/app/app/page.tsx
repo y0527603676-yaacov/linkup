@@ -42,7 +42,8 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
 
   return (
     <AppShell ctx={ctx} active="home" path="/app">
-      <PageHead title={org.name} lead={org.type === "store" && d.founders_until ? t.dash.founders(date(d.founders_until, locale)) : undefined} />
+      <PageHead title={org.type === "store" ? t.dash.storeTitle : org.name}
+        lead={org.type === "store" ? [org.name, d.founders_until ? t.dash.founders(date(d.founders_until, locale)) : ""].filter(Boolean).join(" · ") : undefined} />
       {sp.accepted && <Alert kind="ok" text={t.dash.accepted} />}
       {next && <NextAction eyebrow={t.next.title} title={next.t} text={next.d} cta={next.cta} href={next.href} />}
 
@@ -50,10 +51,10 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
         <section className="section stats">
           {org.type === "store" ? (
             <>
-              <Stat label={t.dash.salesMonth} value={money(d.month_sales_minor, cur, locale)} />
-              <Stat label={t.dash.partners} value={d.active_partners} />
-              {status.is_admin && <Stat label={t.dash.approvedComm} value={money(d.approved_commissions_minor, cur, locale)} />}
-              {status.is_admin && <Stat label={t.dash.feeMonth} value={money(d.month_platform_fee_minor, cur, locale)} />}
+              <Stat label={t.dash.storeSales} value={<>{money(d.month_sales_minor, cur, locale)} <small className="muted">{t.dash.thisMonth}</small></>} />
+              {status.is_admin && <Stat label={t.dash.storeComm} value={money(Number(d.approved_commissions_minor ?? 0) + Number(d.pending_commissions_minor ?? 0), cur, locale)} />}
+              <Stat label={t.dash.storePartners} value={d.active_partners} />
+              <Stat label={t.dash.storeOffers} value={(status.standing_live ? 1 : 0) + Number(status.live_campaigns ?? 0)} />
             </>
           ) : (
             <>

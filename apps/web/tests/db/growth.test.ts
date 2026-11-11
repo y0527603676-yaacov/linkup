@@ -160,6 +160,12 @@ describe("catalogue, opportunities & joining", () => {
     expect(a.products.map((p: any) => p.name)).toEqual(["Ring 4"]);
     expect(await rpc(anon, "get_public_proposal", { p_token: "0".repeat(24) })).toBeNull();
   });
+  it("search matches the store name, the offer title or a product name", async () => {
+    const ids = async (s: string) => (await rpc(u.c!, "catalog", { p_search: s })).map((x: any) => x.store_org_id);
+    expect(await ids("ring 4")).toContain(org.A);        // product name
+    expect(await ids("occasion")).toContain(org.A);      // offer title
+    expect(await ids("no-such-thing-xyz")).not.toContain(org.A);
+  });
   it("creator joins instantly (auto-approve) and gets a personal code", async () => {
     const r = await rpc(u.c!, "join_opportunity", { p_opportunity: (await q(`select id from opportunities where store_org_id = $1`, [org.A]))[0]!.id, p_creator: org.C });
     expect(r.status).toBe("approved");

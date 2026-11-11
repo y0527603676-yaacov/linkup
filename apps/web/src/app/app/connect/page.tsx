@@ -79,7 +79,8 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
             <label className="field"><span>{l.site}</span>
               <input name="site" required dir="ltr" inputMode="url" placeholder="https://myshop.co.il" defaultValue={site} /></label>
             <fieldset className="stack" style={{ border: 0, padding: 0, margin: 0, gap: 8 }}>
-              <legend className="small"><b>{w.consentTitle}</b></legend>
+              <legend><b>{w.consentTitle}</b></legend>
+              <p className="small" style={{ margin: 0 }}>{w.consentLead}</p>
               {Object.keys(w.items).map((k) => (
                 <div key={k} className="stack" style={{ gap: 2 }}>
                   <label className="row small" style={{ alignItems: "flex-start", gap: 8, flexWrap: "nowrap" }}><input style={{ width: "auto", marginTop: 2, flex: "none" }} type="checkbox" name="consent" value={k} required /> <span>{w.items[k]}</span></label>
@@ -95,7 +96,7 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
               <p className="small muted" style={{ margin: 0 }}>{w.modeHint}</p>
             </fieldset>
             {published.size > 0
-              ? <p className="small" style={{ margin: 0 }}>{w.docsLead} {([["store-terms", w.docTerms], ["privacy", w.docPrivacy], ["cookies", w.docCookies]] as const)
+              ? <p className="small" style={{ margin: 0 }}>{w.docsNote} {([["store-terms", w.docTerms], ["privacy", w.docPrivacy], ["cookies", w.docCookies]] as const)
                   .filter(([k]) => published.has(k)).map(([k, label], i) => <span key={k}>{i > 0 ? " · " : ""}<a href={`/legal/${k}`} target="_blank">{label}</a></span>)}</p>
               : <p className="small muted" style={{ margin: 0 }}>{w.docsPending}</p>}
             <LegalChecks docs={legal} locale={locale} label={t.lc.store} />

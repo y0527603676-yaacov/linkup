@@ -39,8 +39,8 @@ export default async function Catalog({ searchParams }: { searchParams: Promise<
       </nav>
       {items.length === 0 ? (
         <div className="empty stack" style={{ alignItems: "center", gap: 10 }}>
-          <span>{sp.q ? c.empty : c.emptyInvite}</span>
-          <Link className="btn btn-primary btn-sm" href={`/app/invite?org=${org.id}`}>{t.next.inviteStore.cta}</Link>
+          {sp.q ? <span>{c.empty}</span> : <><b>{c.emptyTitle}</b><span>{c.emptyInvite}</span></>}
+          <Link className="btn btn-primary btn-sm" href={`/app/invite?org=${org.id}`}>{c.inviteStore}</Link>
         </div>) : (
         <div className="opps">
           {items.map((o) => {
@@ -57,6 +57,14 @@ export default async function Catalog({ searchParams }: { searchParams: Promise<
                   <div className="row between"><b>{o.store_name}</b>{o.kind === "campaign" && <span className="badge badge-accent">LAUNCH</span>}</div>
                   <span className="small">{o.title}</span>
                   {o.description && <span className="small muted">{o.description.slice(0, 140)}</span>}
+                  <details className="small">
+                    <summary>{c.view}</summary>
+                    <div className="stack" style={{ gap: 4, marginTop: 6 }}>
+                      {o.description && <p className="muted" style={{ margin: 0, whiteSpace: "pre-wrap" }}>{o.description}</p>}
+                      {o.products.map((p) => <span key={p.id}>{p.name}{p.price_minor != null ? ` · ${money(p.price_minor, p.currency, locale)}` : ""}</span>)}
+                      {o.store_url && <a href={o.store_url} target="_blank" rel="noopener" className="ltr">{o.store_url.replace(/^https?:\/\//, "")}</a>}
+                    </div>
+                  </details>
                   <div className="row">
                     <span className="badge badge-money">{t.creators.commission} {pct(o.commission_bps, locale)}</span>
                     <span className="badge">{t.creators.discount} {o.coupon_discount_pct}%</span>
@@ -69,7 +77,7 @@ export default async function Catalog({ searchParams }: { searchParams: Promise<
                       : st === "rejected" ? null
                       : <form action={joinOpportunity}><input type="hidden" name="org" value={org.id} /><input type="hidden" name="id" value={o.id} />
                           <label className="row small" style={{ alignItems: "flex-start", gap: 6, marginBottom: 6 }}><input type="checkbox" name="collab" value="1" required style={{ width: "auto", marginTop: 3 }} /><span>{t.lc.collab} <a href="/legal/commissions" target="_blank" rel="noopener">{t.legal.title}</a></span></label>
-                          <button className="btn btn-primary btn-sm btn-block">{o.auto_approve ? c.join : c.request}</button></form>}
+                          <button className="btn btn-primary btn-sm btn-block">{c.collab}</button></form>}
                   </div>
                 </div>
               </article>

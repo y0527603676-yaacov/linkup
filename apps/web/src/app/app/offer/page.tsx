@@ -32,7 +32,13 @@ export default async function Offer({ searchParams }: { searchParams: Promise<Re
         {standing && <span className={`badge ${standing.status === "live" ? "badge-money" : ""}`}>{standing.status === "live" ? o.live : o.paused}</span>}
       </PageHead>
       <Alert text={errorText(sp.error, t)} />
-      {sp.ok && <Alert kind="ok" text={t.common.saved} />}
+      {sp.ok === "offer" && standing?.status === "live" ? (
+        <div className="card stack" style={{ marginBottom: 16, borderColor: "var(--money)" }}>
+          <h2 style={{ margin: 0 }}>{o.successTitle}</h2>
+          <p className="muted" style={{ margin: 0 }}>{o.successText}</p>
+          <div><a className="btn btn-primary btn-sm" href={`/app/invite?org=${org.id}`}>{o.successCta}</a></div>
+        </div>
+      ) : sp.ok ? <Alert kind="ok" text={t.common.saved} /> : null}
 
       <form action={saveOffer} className="card stack">
         <input type="hidden" name="org" value={org.id} />
@@ -41,10 +47,12 @@ export default async function Offer({ searchParams }: { searchParams: Promise<Re
         <label className="field"><span>{o.description}</span>
           <textarea name="description" maxLength={1000} defaultValue={standing?.description ?? ""} disabled={ro} /></label>
         <div className="fields-2">
-          <label className="field"><span>{o.commission}</span>
-            <input name="commission" type="number" min={1} max={50} step={0.5} required defaultValue={(standing?.commission_bps ?? 1000) / 100} disabled={ro} /></label>
-          <label className="field"><span>{o.discount}</span>
-            <input name="discount" type="number" min={0} max={50} step={1} required defaultValue={standing?.coupon_discount_pct ?? 10} disabled={ro} /></label>
+          <label className="field"><span>{o.commission} (%)</span>
+            <input name="commission" type="number" min={1} max={50} step={0.5} required defaultValue={(standing?.commission_bps ?? 1000) / 100} disabled={ro} />
+            <small className="muted">{o.commissionHelp}</small></label>
+          <label className="field"><span>{o.discount} (%)</span>
+            <input name="discount" type="number" min={0} max={50} step={1} required defaultValue={standing?.coupon_discount_pct ?? 10} disabled={ro} />
+            <small className="muted">{o.discountHelp}</small></label>
         </div>
         <label className="check"><input type="checkbox" name="auto" defaultChecked={standing?.auto_approve ?? true} disabled={ro} />
           <span><b>{o.autoApprove}</b><br /><small className="muted">{o.autoApproveHelp}</small></span></label>

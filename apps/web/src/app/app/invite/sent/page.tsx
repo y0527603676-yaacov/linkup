@@ -18,7 +18,7 @@ export default async function Sent({ searchParams }: { searchParams: Promise<Rec
         <PageHead title={t.invite.sentTitle} lead={t.invite.sentLead} />
         <div className="card stack">
           <div className="keybox" dir="ltr">{link}</div>
-          <ShareButtons org={org.id} text={text} copyText={link} labels={{ wa: t.common.shareWhatsapp, copy: t.common.copy, copied: t.common.copied }} />
+          <ShareButtons org={org.id} text={text} copyText={link} labels={{ wa: t.invite.send, copy: t.common.copy, copied: t.common.copied }} />
         </div>
         <p className="center section"><Link href={`/app/invite?org=${org.id}`}>{t.invite.another}</Link></p>
       </div>

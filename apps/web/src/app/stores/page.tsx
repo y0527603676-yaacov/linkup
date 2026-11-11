@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Faq, PublicPage } from "@/components/Site";
+import { PublicPage } from "@/components/Site";
 import { PriceCalc } from "@/components/PriceCalc";
 import { getT } from "@/i18n";
 
@@ -16,57 +16,30 @@ export default async function Stores() {
   return (
     <PublicPage path="/stores">
       <section className="hero container">
-        <p className="eyebrow">{s.eyebrow}</p>
         <h1>{s.title}</h1>
         <p className="lead">{s.lead}</p>
-        <div className="actions">
-          <Link className="btn btn-primary" href={cta}>{s.cta}</Link>
-          <a className="btn btn-ghost" href="#how">{t.common.learnMore}</a>
-        </div>
-        <ul className="benefits">{s.benefits.map((b) => <li key={b}>{b}</li>)}</ul>
+        <div className="actions"><Link className="btn btn-primary" href={cta}>{s.cta}</Link></div>
+        <p className="note">{s.note}</p>
       </section>
-      <section className="band alt" id="how">
+      <section className="band alt">
         <div className="container">
-          <h2>{s.stepsTitle}</h2>
-          <ol className="steps" style={{ marginTop: 20 }}>{s.steps.map((x) => <li key={x.t}><h3>{x.t}</h3><p className="muted">{x.d}</p></li>)}</ol>
+          <h2>{s.benefitsTitle}</h2>
+          <div className="features four">
+            {s.benefits.map((b) => <div className="feature" key={b.t}><h3>{b.t}</h3><p className="muted">{b.d}</p></div>)}
+          </div>
         </div>
       </section>
       <section className="band">
         <div className="container">
-          <h2>{s.priceTitle}</h2>
-          <p className="sub">{s.priceLead}</p>
+          <h2>{s.calcTitle}</h2>
+          <p className="sub">{s.calcLead}</p>
           <PriceCalc l={s.calc} locale={locale} />
-        </div>
-      </section>
-      <section className="band alt">
-        <div className="container">
-          <h2>{s.measureTitle}</h2>
-          <ol className="steps" style={{ marginTop: 20 }}>{s.measure.map((x) => <li key={x.t}><h3>{x.t}</h3><p className="muted">{x.d}</p></li>)}</ol>
-        </div>
-      </section>
-      <section className="band">
-        <div className="container split">
-          <div className="card">
-            <p className="eyebrow">{s.launchTitle}</p>
-            <h2 style={{ marginTop: 8 }}>{s.launchTitle}</h2>
-            <p className="muted">{s.launchText}</p>
-          </div>
-          <div className="fp">
-            <h2>{t.fp.title}</h2>
-            <p>{t.fp.lead}</p>
-            <Link className="btn btn-primary" href="/founding-partners">{t.home.fpCta}</Link>
-          </div>
-        </div>
-      </section>
-      <section className="band alt">
-        <div className="container" style={{ maxWidth: 760 }}>
-          <h2>{s.faqTitle}</h2>
-          <Faq items={s.faq} />
         </div>
       </section>
       <section className="final container">
         <h2>{s.finalTitle}</h2>
-        <Link className="btn btn-primary" href={cta}>{s.cta}</Link>
+        <p className="muted final-text">{s.finalText}</p>
+        <Link className="btn btn-primary" href={cta}>{s.finalCta}</Link>
       </section>
     </PublicPage>
   );

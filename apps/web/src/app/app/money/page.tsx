@@ -22,6 +22,10 @@ export default async function Money({ searchParams }: { searchParams: Promise<Re
     isStore && status.is_admin ? sb.from("invoices").select("*").eq("store_org_id", org.id).neq("status", "void").order("period_start", { ascending: false }).limit(24) : Promise.resolve({ data: [] as any[] }),
     isStore && status.is_admin ? sb.rpc("store_fee_terms", { p_store: org.id }) : Promise.resolve({ data: null }),
   ]);
+  const { data: dash } = isStore && status.is_admin ? await sb.rpc("org_dashboard", { p_org: org.id }) : { data: null };
+  const B = (bal ?? []) as PairBal[];
+  const sum = (k: keyof PairBal) => B.reduce((a, x) => a + Number(x[k] ?? 0), 0);
+  const cur = B[0]?.currency ?? "ILS";
   const terms = ((fee as any)?.terms ?? []) as Term[];
   const isAdminStore = isStore && status.is_admin;
   const invIds = ((invoices ?? []) as any[]).map((i) => i.id as string);
@@ -40,9 +44,30 @@ export default async function Money({ searchParams }: { searchParams: Promise<Re
   const d = (x: string | null) => (x ? shortDate(x, locale) : "");
   return (
     <AppShell ctx={ctx} active="money" path="/app/money">
-      <PageHead title={m.title} lead={isStore ? m.storeLead : m.creatorLead} />
+      <PageHead title={isStore ? m.storeTitle : m.creatorTitle} lead={isStore ? m.sExplain : m.cExplain} />
       <Alert text={errorText(sp.error, t)} />
       {sp.ok && <Alert kind="ok" text={t.common.saved} />}
+      {!isStore && status.sales === 0 ? (
+        <div className="card stack" style={{ marginBottom: 16 }}>
+          <b>{m.cEmptyTitle}</b>
+          <span className="muted">{m.cEmptyText}</span>
+          <div><a className="btn btn-primary btn-sm" href={`/app/catalog?org=${org.id}`}>{m.cEmptyCta}</a></div>
+        </div>
+      ) : status.is_admin && (
+        <section className="section stats">
+          {isStore ? <>
+            <div className="stat"><b>{money(sum("pending_minor") + sum("approved_minor"), cur, locale)}</b><span>{m.sComm}</span></div>
+            <div className="stat"><b>{money(sum("pending_minor"), cur, locale)}</b><span>{m.sPending}</span></div>
+            <div className="stat money"><b>{money(sum("balance_minor"), cur, locale)}</b><span>{m.sReady}</span></div>
+            <div className="stat"><b>{money((dash as any)?.month_platform_fee_minor ?? 0, cur, locale)} <small className="muted">{m.thisMonth}</small></b><span>{m.sFee}</span></div>
+          </> : <>
+            <div className="stat"><b>{money(sum("pending_minor"), cur, locale)}</b><span>{m.cPending}</span></div>
+            <div className="stat"><b>{money(sum("approved_minor"), cur, locale)}</b><span>{m.cApproved}</span></div>
+            <div className="stat money"><b>{money(sum("balance_minor"), cur, locale)}</b><span>{m.cToPay}</span></div>
+            <div className="stat"><b>{money(sum("confirmed_minor"), cur, locale)}</b><span>{m.cReceived}</span></div>
+          </>}
+        </section>
+      )}
 
       {isStore && status.is_admin && fee && (
         <section className="section">

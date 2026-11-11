@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Faq, PublicPage } from "@/components/Site";
+import { PublicPage } from "@/components/Site";
 import { getT } from "@/i18n";
 import { getSupabase } from "@/lib/supabase/server";
 import { money, pct } from "@/lib/format";
@@ -22,19 +22,30 @@ export default async function Creators() {
   return (
     <PublicPage path="/creators">
       <section className="hero container">
-        <p className="eyebrow">{c.eyebrow}</p>
         <h1>{c.title}</h1>
         <p className="lead">{c.lead}</p>
-        <div className="actions">
-          <Link className="btn btn-primary" href={cta}>{c.cta}</Link>
-          <a className="btn btn-ghost" href="#how">{t.common.learnMore}</a>
-        </div>
-        <ul className="benefits">{c.benefits.map((b) => <li key={b}>{b}</li>)}</ul>
+        <div className="actions"><Link className="btn btn-primary" href={cta}>{c.cta}</Link></div>
+        <p className="note">{c.note}</p>
       </section>
       <section className="band alt">
         <div className="container">
-          <h2>{c.nowTitle}</h2>
-          {items.length === 0 ? <p className="sub">{c.nowEmpty}</p> : (
+          <h2>{c.benefitsTitle}</h2>
+          <div className="features four">
+            {c.benefits.map((b) => <div className="feature" key={b.t}><h3>{b.t}</h3><p className="muted">{b.d}</p></div>)}
+          </div>
+        </div>
+      </section>
+      <section className="band">
+        <div className="container">
+          <h2>{c.stepsTitle}</h2>
+          <ol className="steps" style={{ marginTop: 20 }}>{c.steps.map((x) => <li key={x}><h3>{x}</h3></li>)}</ol>
+        </div>
+      </section>
+      {/* Live opportunities: real data only, shown when there are any */}
+      {items.length > 0 && (
+        <section className="band alt">
+          <div className="container">
+            <h2>{c.nowTitle}</h2>
             <div className="opps" style={{ marginTop: 16 }}>
               {items.map((o, i) => (
                 <div className="opp" key={i}>
@@ -48,37 +59,12 @@ export default async function Creators() {
                 </div>
               ))}
             </div>
-          )}
-        </div>
-      </section>
-      <section className="band" id="how">
-        <div className="container">
-          <h2>{c.stepsTitle}</h2>
-          <ol className="steps" style={{ marginTop: 20 }}>{c.steps.map((x) => <li key={x.t}><h3>{x.t}</h3><p className="muted">{x.d}</p></li>)}</ol>
-        </div>
-      </section>
-      <section className="band alt">
-        <div className="container split">
-          <div>
-            <h2>{c.whyTitle}</h2>
-            <ul className="ticks" style={{ marginTop: 12 }}>{c.why.map((x) => <li key={x}>{x}</li>)}</ul>
           </div>
-          <div className="fp">
-            <h2>{t.fp.title}</h2>
-            <p>{t.fp.lead}</p>
-            <Link className="btn btn-primary" href="/founding-partners">{t.home.fpCta}</Link>
-          </div>
-        </div>
-      </section>
-      <section className="band">
-        <div className="container" style={{ maxWidth: 760 }}>
-          <h2>{c.faqTitle}</h2>
-          <Faq items={c.faq} />
-        </div>
-      </section>
+        </section>
+      )}
       <section className="final container">
         <h2>{c.finalTitle}</h2>
-        <Link className="btn btn-primary" href={cta}>{c.cta}</Link>
+        <Link className="btn btn-primary" href={cta}>{c.finalCta}</Link>
       </section>
     </PublicPage>
   );

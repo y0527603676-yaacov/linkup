@@ -309,3 +309,15 @@ button[data-pending], .btn[data-pending] { opacity: .7; cursor: progress; }
   .steps li p { margin: 0; font-size: .92rem; }
   .band { padding-block: 36px; }
 }
+
+/* Feature cards (marketing pages) */
+.features { display: grid; gap: 14px; margin-top: 20px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.features .feature { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; }
+.band:not(.alt) .features .feature { background: var(--surface); }
+.features .feature h3 { font-size: 1.12rem; margin: 0 0 6px; }
+.features .feature p { margin: 0; }
+.features .feature .ic { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 14px; background: var(--brand-soft); font-size: 1.3rem; margin-bottom: 12px; }
+.final .final-text { max-width: 52ch; margin: -8px auto 20px; }
+.final .center-actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+.steps li h3:only-child { margin: 0; }
+@media (min-width: 900px) { .features.four { grid-template-columns: repeat(4, 1fr); } .features.three { grid-template-columns: repeat(3, 1fr); } }

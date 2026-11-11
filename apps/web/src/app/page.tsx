@@ -3,33 +3,32 @@ import { PublicPage } from "@/components/Site";
 import { getT } from "@/i18n";
 
 export default async function Home() {
-  const { t, dir } = await getT();
+  const { t } = await getT();
   const h = t.home;
-  const arrow = dir === "rtl" ? "←" : "→";
+  const storeCta = `/login?next=${encodeURIComponent("/app/new?type=store")}`;
+  const creatorCta = `/login?next=${encodeURIComponent("/app/new?type=creator")}`;
+  const icons = ["🛍️", "✨", "📊"];
   return (
     <PublicPage path="/">
       <section className="hero container">
-        <p className="eyebrow">{h.eyebrow}</p>
         <h1>{h.title}</h1>
         <p className="lead">{h.lead}</p>
-        <ul className="benefits" aria-label={h.eyebrow}>{h.benefits.map((b) => <li key={b}>{b}</li>)}</ul>
-        <p className="choose">{h.choose}</p>
-        <div className="split choices">
-          <Link href="/stores" className="choice store">
-            <span className="ic" aria-hidden>🛍️</span>
-            <h2>{h.storeCard.title}</h2>
-            <p className="muted">{h.storeCard.text}</p>
-            <div className="go">{h.storeCard.cta} {arrow}</div>
-          </Link>
-          <Link href="/creators" className="choice creator">
-            <span className="ic" aria-hidden>✨</span>
-            <h2>{h.creatorCard.title}</h2>
-            <p className="muted">{h.creatorCard.text}</p>
-            <div className="go">{h.creatorCard.cta} {arrow}</div>
-          </Link>
+        <div className="actions">
+          <Link className="btn btn-primary" href="/stores">{h.ctaStore}</Link>
+          <Link className="btn btn-ghost" href="/creators">{h.ctaCreator}</Link>
         </div>
       </section>
       <section className="band alt">
+        <div className="container">
+          <h2>{h.benefitsTitle}</h2>
+          <div className="features three">
+            {h.cards.map((c, i) => (
+              <div className="feature" key={c.t}><span className="ic" aria-hidden>{icons[i]}</span><h3>{c.t}</h3><p className="muted">{c.d}</p></div>
+            ))}
+          </div>
+        </div>
+      </section>
+      <section className="band">
         <div className="container">
           <h2>{h.howTitle}</h2>
           <ol className="steps" style={{ marginTop: 20 }}>
@@ -37,18 +36,12 @@ export default async function Home() {
           </ol>
         </div>
       </section>
-      <section className="band">
-        <div className="container split">
-          <div>
-            <h2>{h.trustTitle}</h2>
-            <p className="sub">{t.brand}.</p>
-            <ul className="ticks">{h.trust.map((x) => <li key={x}>{x}</li>)}</ul>
-          </div>
-          <div className="fp">
-            <h2>{h.fpTitle}</h2>
-            <p>{h.fpText}</p>
-            <Link className="btn btn-primary" href="/founding-partners" style={{ marginTop: 12 }}>{h.fpCta}</Link>
-          </div>
+      <section className="final container">
+        <h2>{h.joinTitle}</h2>
+        <p className="muted final-text">{h.joinText}</p>
+        <div className="actions center-actions">
+          <Link className="btn btn-primary" href={storeCta}>{h.joinStore}</Link>
+          <Link className="btn btn-ghost" href={creatorCta}>{h.joinCreator}</Link>
         </div>
       </section>
     </PublicPage>

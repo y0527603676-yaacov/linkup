@@ -20,7 +20,8 @@ export default async function Login({ searchParams }: { searchParams: Promise<Re
         {sp.sent && sp.email ? (
           <>
             <h1>{l.sentTitle}</h1>
-            <p className="muted">{l.sentText(sp.email)}</p>
+            <p className="muted">{l.sentText}</p>
+            <p className="small ltr" style={{ margin: 0 }}><b>{sp.email}</b></p>
             <Alert text={errorText(sp.error, t)} />
             {LOGIN_EMAIL_HAS_CODE && (
               <CodeEntry email={sp.email} next={next} action={verifyCode} forced={sp.error === "bad_code" || sp.error === "link_other_browser"}
