@@ -27,7 +27,10 @@ export async function SiteHeader({ path = "/" }: { path?: string }) {
           <Link className="hide-sm" href="/creators">{t.common.creators}</Link>
           <a href={`/lang?to=${locale === "he" ? "en" : "he"}&next=${encodeURIComponent(path)}`} lang={locale === "he" ? "en" : "he"}>{t.common.langSwitch}</a>
           {user ? <Link className="btn btn-primary btn-sm" href="/app">LINKUP</Link>
-                : <Link className="btn btn-ghost btn-sm" href="/login">{t.common.login}</Link>}
+                : <>
+                    <Link className="btn btn-ghost btn-sm" href="/login">{t.common.login}</Link>
+                    <Link className="btn btn-primary btn-sm" href={`/login?next=${encodeURIComponent("/app/new")}`}>{t.common.start}</Link>
+                  </>}
         </nav>
       </div>
     </header>

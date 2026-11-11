@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { PublicPage, Faq } from "@/components/Site";
 import { FpBand } from "@/components/FpBand";
+import { Icon } from "@/components/Icons";
+import { CreatorVisual } from "@/components/Mockups";
 import { getT } from "@/i18n";
 import { getSupabase } from "@/lib/supabase/server";
 import { money, pct } from "@/lib/format";
@@ -22,24 +24,34 @@ export default async function Creators() {
   const cta = `/login?next=${encodeURIComponent("/app/new?type=creator")}`;
   return (
     <PublicPage path="/creators">
-      <section className="hero container">
-        <h1>{c.title}</h1>
-        <p className="lead">{c.lead}</p>
-        <div className="actions"><Link className="btn btn-primary" href={cta}>{c.cta}</Link></div>
-        <p className="note">{c.note}</p>
+      <section className="hero hero-split container">
+        <div className="hero-copy">
+          <h1>{c.title}</h1>
+          <p className="lead">{c.lead}</p>
+          <div className="actions"><Link className="btn btn-primary btn-lg" href={cta}>{c.cta}</Link></div>
+          <p className="note">{c.note}</p>
+        </div>
+        <CreatorVisual t={t} locale={locale} />
       </section>
       <section className="band alt">
         <div className="container">
           <h2>{c.benefitsTitle}</h2>
           <div className="features four">
-            {c.benefits.map((b) => <div className="feature" key={b.t}><h3>{b.t}</h3><p className="muted">{b.d}</p></div>)}
+            {c.benefits.map((b, i) => (
+              <div className="feature" key={b.t}>
+                <span className={`tile ${["t-brand", "t-accent", "t-money", "t-brand"][i]}`}><Icon name={["search", "link", "wallet", "heart"][i]!} /></span>
+                <h3>{b.t}</h3><p className="muted">{b.d}</p>
+              </div>
+            ))}
           </div>
         </div>
       </section>
       <section className="band">
         <div className="container">
           <h2>{c.stepsTitle}</h2>
-          <ol className="steps" style={{ marginTop: 20 }}>{c.steps.map((x) => <li key={x}><h3>{x}</h3></li>)}</ol>
+          <ol className="flow flow-compact">{c.steps.map((x, i) => (
+            <li key={x}><span className="flow-node"><Icon name={["user", "share", "wallet"][i]!} size={26} /><b className="flow-n">{i + 1}</b></span><h3>{x}</h3></li>
+          ))}</ol>
         </div>
       </section>
       {/* Live opportunities: real data only, shown when there are any */}

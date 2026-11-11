@@ -107,6 +107,10 @@ export const en: Dict = {
     commission: "Commission",
     discount: "Follower discount",
   },
+  demo: {
+    badge: "Illustration", store: "Studio Lumi", creator: "Noa", creatorHandle: "@noa.style", code: "NOA10",
+    names: ["Noa", "Dana", "Maya"],
+  },
   fp: {
     title: "FOUNDING PARTNERS",
     headline: "Invite friends. Earn from their success.",

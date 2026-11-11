@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { PublicPage, Faq } from "@/components/Site";
 import { FpBand } from "@/components/FpBand";
+import { Icon } from "@/components/Icons";
+import { StoreDashVisual, LaunchVisual } from "@/components/Mockups";
 import { PriceCalc } from "@/components/PriceCalc";
 import { getT } from "@/i18n";
 
@@ -16,17 +18,25 @@ export default async function Stores() {
   const cta = `/login?next=${encodeURIComponent("/app/new?type=store")}`;
   return (
     <PublicPage path="/stores">
-      <section className="hero container">
-        <h1>{s.title}</h1>
-        <p className="lead">{s.lead}</p>
-        <div className="actions"><Link className="btn btn-primary" href={cta}>{s.cta}</Link></div>
-        <p className="note">{s.note}</p>
+      <section className="hero hero-split container">
+        <div className="hero-copy">
+          <h1>{s.title}</h1>
+          <p className="lead">{s.lead}</p>
+          <div className="actions"><Link className="btn btn-primary btn-lg" href={cta}>{s.cta}</Link></div>
+          <p className="note">{s.note}</p>
+        </div>
+        <StoreDashVisual t={t} locale={locale} />
       </section>
       <section className="band alt">
         <div className="container">
           <h2>{s.benefitsTitle}</h2>
           <div className="features four">
-            {s.benefits.map((b) => <div className="feature" key={b.t}><h3>{b.t}</h3><p className="muted">{b.d}</p></div>)}
+            {s.benefits.map((b, i) => (
+              <div className={`feature ${i === 0 ? "feature-hl" : ""}`} key={b.t}>
+                <span className={`tile ${["t-brand", "t-accent", "t-money", "t-brand"][i]}`}><Icon name={["target", "sliders", "chart", "users"][i]!} /></span>
+                <h3>{b.t}</h3><p className="muted">{b.d}</p>
+              </div>
+            ))}
           </div>
         </div>
       </section>
@@ -47,9 +57,13 @@ export default async function Stores() {
       </section>
       <section className="band alt">
         <div className="container">
-          <div className="card launch-card">
-            <p className="eyebrow">{s.launchTitle}</p>
-            <p style={{ margin: "8px 0 0", fontSize: "1.08rem" }}>{s.launchText}</p>
+          <div className="launch">
+            <div className="launch-copy">
+              <span className="tile t-accent lg"><Icon name="rocket" size={28} /></span>
+              <h2>{s.launchTitle}</h2>
+              <p>{s.launchText}</p>
+            </div>
+            <LaunchVisual t={t} />
           </div>
         </div>
       </section>

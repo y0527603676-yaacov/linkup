@@ -106,6 +106,10 @@ export const he = {
     commission: "עמלה",
     discount: "הנחה לעוקבים",
   },
+  demo: {
+    badge: "המחשה", store: "Studio Lumi", creator: "נועה", creatorHandle: "@noa.style", code: "NOA10",
+    names: ["נועה", "דנה", "מאיה"],
+  },
   fp: {
     title: "FOUNDING PARTNERS",
     headline: "מזמינים חברים. מרוויחים מההצלחה שלהם.",
