@@ -6,8 +6,9 @@
 //   POST /apps/shopify/ref        Purchase event from LINKUP's Shopify app pixel (order re-read from Shopify's Admin API)
 //   POST /apps/wix/ref            Personal-link beacon from LINKUP's Wix embedded script (order re-read from Wix's API)
 //   POST /apps/cron/sync          Scheduled sync (X-LinkUp-Cron = LINKUP_CRON_SECRET): health, coupons, products
-// Not active until the app credentials are set as function secrets (SHOPIFY_API_KEY / SHOPIFY_API_SECRET,
-// WIX_APP_ID / WIX_APP_SECRET / WIX_PUBLIC_KEY) and the store-facing button is enabled.
+// OFF by default: every route answers 503 until LINKUP_APPS_ENABLED=1 is set as a function secret, and each platform
+// also needs its own credentials (SHOPIFY_API_KEY / SHOPIFY_API_SECRET, WIX_APP_ID / WIX_APP_SECRET / WIX_PUBLIC_KEY)
+// plus LINKUP_REF_SECRET for personal links. Secrets live only in Supabase function secrets — never in code or logs.
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { shopifyCallback, shopifyRef, shopifyWebhook, syncAll, wixCallback, wixRef, wixWebhook, type Config, type Rpc } from "./core.ts";
 
@@ -35,9 +36,17 @@ const reply = (r: { status: number; body?: unknown; redirect?: string }, extra: 
 // The Wix beacon is sent from the store's own site (any domain); it returns nothing sensitive.
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST, OPTIONS", "Access-Control-Allow-Headers": "content-type" };
 
+const enabled = Deno.env.get("LINKUP_APPS_ENABLED") === "1";
+const off = () => reply({ status: 503, body: { error: "not_enabled" } });
+
 Deno.serve(async (req) => {
+  if (!enabled) return off();
   const url = new URL(req.url);
   const path = url.pathname.replace(/\/+$/, "").split("/").slice(-2).join("/");
+  const shopifyReady = !!(cfg.shopifyKey && cfg.shopifySecret), wixReady = !!(cfg.wixAppId && cfg.wixSecret && cfg.wixPublicKey);
+  if (path.startsWith("shopify/") && !shopifyReady) return off();
+  if (path.startsWith("wix/") && !wixReady) return off();
+  if (path.endsWith("/ref") && !cfg.refSecret) return off();   // personal links require signed visits
   if (req.method === "GET" && path === "shopify/callback") return reply(await shopifyCallback(rpc, fetch, cfg, url.searchParams));
   if (req.method === "GET" && path === "wix/callback") return reply(await wixCallback(rpc, fetch, cfg, url.searchParams));
   if (req.method === "OPTIONS" && (path === "wix/ref" || path === "shopify/ref")) return new Response(null, { status: 204, headers: CORS });

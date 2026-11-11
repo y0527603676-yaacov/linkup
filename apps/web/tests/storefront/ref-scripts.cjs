@@ -3,7 +3,7 @@
 const { chromium, devices } = require("playwright");
 const fs = require("fs"); const path = require("path");
 const ROOT = path.join(__dirname, "../../../../integrations");
-const shopJs = fs.readFileSync(path.join(ROOT, "shopify-app/extensions/linkup-ref/assets/linkup-ref.js"), "utf8");
+const shopJs = fs.readFileSync(path.join(ROOT, "shopify-optional/linkup-ref/assets/linkup-ref.js"), "utf8");
 const wixHtml = fs.readFileSync(path.join(ROOT, "wix-app/embedded-script/linkup-ref.html"), "utf8")
   .replace("{{endpoint}}", "https://fn.test/functions/v1/apps/wix/ref").replace("{{instance}}", "1a2b3c4d-1111-4222-8333-944455556666");
 let failures = 0;

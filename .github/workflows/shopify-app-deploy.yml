@@ -1,0 +1,53 @@
+# Deploys the LINKUP Shopify app configuration and its app pixel (integrations/shopify-app) — run by hand only
+# (Actions → "Shopify app deploy" → Run workflow). Uses Shopify's service-account token for this one app.
+# Needs: repository secret SHOPIFY_SERVICE_ACCOUNT_TOKEN, repository variable SHOPIFY_CLIENT_ID.
+name: Shopify app deploy
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shopify-app-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: full-build
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check settings
+        env:
+          CLIENT_ID: ${{ vars.SHOPIFY_CLIENT_ID }}
+          HAS_TOKEN: ${{ secrets.SHOPIFY_SERVICE_ACCOUNT_TOKEN != '' }}
+        run: |
+          if [ -z "$CLIENT_ID" ]; then echo "::error::Missing repository variable SHOPIFY_CLIENT_ID"; exit 1; fi
+          if [ "$HAS_TOKEN" != "true" ]; then echo "::error::Missing repository secret SHOPIFY_SERVICE_ACCOUNT_TOKEN"; exit 1; fi
+          if ! echo "$CLIENT_ID" | grep -Eq '^[A-Za-z0-9]{16,64}$'; then echo "::error::SHOPIFY_CLIENT_ID looks wrong"; exit 1; fi
+
+      - name: Install
+        working-directory: integrations/shopify-app
+        env:
+          CLIENT_ID: ${{ vars.SHOPIFY_CLIENT_ID }}
+        run: |
+          sed -i "s/REPLACE_WITH_SHOPIFY_CLIENT_ID/${CLIENT_ID}/" shopify.app.production.toml
+          npm ci --no-audit --no-fund
+          npm install -g @shopify/cli@5.0.1 --no-audit --no-fund
+
+      - name: Deploy
+        working-directory: integrations/shopify-app
+        env:
+          SHOPIFY_SERVICE_ACCOUNT_TOKEN: ${{ secrets.SHOPIFY_SERVICE_ACCOUNT_TOKEN }}
+          COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
+        run: shopify app deploy --config production --allow-updates --source-control-url "$COMMIT_URL"
