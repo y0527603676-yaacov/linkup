@@ -1,11 +1,12 @@
 <?php
 /**
  * Plugin Name: LINKUP Connector
- * Description: מחבר את חנות ה-WooCommerce ל-LINKUP — קופונים לשותפים, מעקב הפניות ודיווח מכירות מאובטח.
+ * Description: Connects your WooCommerce store to LINKUP: personal coupons for creators, 30-day referral tracking and secure sales reporting.
  * Version: 0.4.1
  * Requires at least: 6.4
  * Requires PHP: 7.4
  * WC requires at least: 8.0
+ * WC tested up to: 9.4
  * Requires Plugins: woocommerce
  * Author: LINKUP
  * License: GPLv2 or later
@@ -83,10 +84,14 @@ function linkup_may_track() {
 }
 
 add_action('init', static function () {
-    if (empty($_GET['lku']) || !linkup_may_track()) {
+    // A public referral link (?lku=CODE) opened by any visitor: there is no form and no state change, so no nonce applies.
+    // The value is reduced to 4–16 letters/digits before use.
+    // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+    $raw = isset($_GET['lku']) ? sanitize_text_field(wp_unslash($_GET['lku'])) : '';
+    if ($raw === '' || !linkup_may_track()) {
         return;
     }
-    $code = preg_replace('/[^A-Za-z0-9]/', '', (string) wp_unslash($_GET['lku']));
+    $code = preg_replace('/[^A-Za-z0-9]/', '', $raw);
     if (strlen($code) < 4 || strlen($code) > 16) {
         return;
     }
@@ -423,41 +428,43 @@ function linkup_settings_page() {
     if (isset($_POST['linkup_nonce']) && wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['linkup_nonce'])), 'linkup_save')) {
         $key = isset($_POST['linkup_key']) ? trim(sanitize_text_field(wp_unslash($_POST['linkup_key']))) : '';
         if (isset($_POST['linkup_disconnect'])) {
-            delete_option(LINKUP_OPT_KEY);
-            delete_option(LINKUP_OPT_LAST);
-            if (function_exists('as_unschedule_all_actions')) {
-                as_unschedule_all_actions('linkup_sync');
-            }
-            $notice = 'החיבור נותק. הקופונים הקיימים וההיסטוריה ב-LINKUP נשמרו.';
+            linkup_forget_connection();
+            $notice = __('Disconnected. LINKUP partner coupons were set to draft; your history in LINKUP is kept.', 'linkup-connector');
         } elseif ($key !== '') {
             if (preg_match('/^lk_[0-9a-f]{32}_[0-9a-f]{64}$/', $key)) {
                 update_option(LINKUP_OPT_KEY, $key, false);
-                $notice = linkup_sync() ? 'מחובר! החנות מסונכרנת עם LINKUP.' : 'המפתח נשמר, אבל החיבור נכשל. ודאו שהעתקתם את המפתח המלא.';
+                $notice = linkup_sync()
+                    ? __('Connected! Your store is in sync with LINKUP.', 'linkup-connector')
+                    : __('The key was saved, but the connection failed. Make sure you copied the whole key.', 'linkup-connector');
             } else {
-                $notice = 'מפתח לא תקין. העתיקו אותו שוב מ-LINKUP.';
+                $notice = __('Invalid key. Copy it again from LINKUP.', 'linkup-connector');
             }
         }
         if (isset($_POST['linkup_sync_now']) && $key === '') {
-            $notice = linkup_sync() ? 'סונכרן בהצלחה.' : 'הסנכרון נכשל.';
+            $notice = linkup_sync() ? __('Synced.', 'linkup-connector') : __('Sync failed.', 'linkup-connector');
         }
     }
     $connected = (bool) linkup_credentials();
     $last = get_option(LINKUP_OPT_LAST, array());
+    $status = $connected
+        ? (!empty($last['ok']) ? __('Connected ✓', 'linkup-connector') : __('Key saved – waiting for the first sync', 'linkup-connector'))
+        : __('Not connected', 'linkup-connector');
     ?>
-    <div class="wrap" dir="rtl" style="max-width:640px">
+    <div class="wrap" style="max-width:640px">
         <h1>LINKUP</h1>
         <?php if ($notice) : ?><div class="notice notice-info"><p><?php echo esc_html($notice); ?></p></div><?php endif; ?>
-        <p>מצב: <strong><?php echo $connected ? (!empty($last['ok']) ? 'מחובר ✓' : 'מפתח שמור — ממתין לסנכרון') : 'לא מחובר'; ?></strong>
-        <?php if (!empty($last['at'])) : ?> · סנכרון אחרון: <?php echo esc_html(wp_date('d/m/Y H:i', (int) $last['at'])); ?><?php endif; ?></p>
+        <p><?php esc_html_e('Status:', 'linkup-connector'); ?> <strong><?php echo esc_html($status); ?></strong>
+        <?php if (!empty($last['at'])) : ?> · <?php esc_html_e('Last sync:', 'linkup-connector'); ?> <?php echo esc_html(wp_date('d/m/Y H:i', (int) $last['at'])); ?><?php endif; ?></p>
         <form method="post">
             <?php wp_nonce_field('linkup_save', 'linkup_nonce'); ?>
-            <p><label for="linkup_key"><strong>מפתח חיבור</strong> (מעתיקים מ-LINKUP)</label></p>
+            <p><label for="linkup_key"><strong><?php esc_html_e('Connection key', 'linkup-connector'); ?></strong> <?php esc_html_e('(copy it from LINKUP)', 'linkup-connector'); ?></label></p>
             <p><input type="password" id="linkup_key" name="linkup_key" class="large-text" autocomplete="off"
-                      placeholder="<?php echo $connected ? '•••••• (שמור). להחלפה — הדביקו מפתח חדש' : 'lk_...'; ?>"></p>
-            <p><button class="button button-primary">שמירה וחיבור</button>
-            <?php if ($connected) : ?> <button class="button" name="linkup_sync_now" value="1">סנכרון עכשיו</button>
-            <button class="button-link-delete" name="linkup_disconnect" value="1" onclick="return confirm('לנתק את החנות מ-LINKUP?')">ניתוק</button><?php endif; ?></p>
+                      placeholder="<?php echo esc_attr($connected ? __('•••••• (saved). To replace it, paste a new key', 'linkup-connector') : 'lk_...'); ?>"></p>
+            <p><button class="button button-primary"><?php esc_html_e('Save and connect', 'linkup-connector'); ?></button>
+            <?php if ($connected) : ?> <button class="button" name="linkup_sync_now" value="1"><?php esc_html_e('Sync now', 'linkup-connector'); ?></button>
+            <button class="button-link-delete" name="linkup_disconnect" value="1" onclick="return confirm(<?php echo esc_attr(wp_json_encode(__('Disconnect this store from LINKUP?', 'linkup-connector'))); ?>)"><?php esc_html_e('Disconnect', 'linkup-connector'); ?></button><?php endif; ?></p>
         </form>
+        <p class="description"><?php esc_html_e('When a visitor arrives through a LINKUP creator link, this plugin sets the first-party cookie "linkup_ref" (creator code and visit time, 30 days) to credit the sale. Mention it in your cookie notice. If your consent banner supports the WP Consent API, the cookie is set only after marketing consent.', 'linkup-connector'); ?></p>
     </div>
     <?php
 }
@@ -470,8 +477,9 @@ function linkup_settings_page() {
  * ------------------------------------------------------------------ */
 /** Partner coupons created by LINKUP go back to draft (kept, not deleted) – no active discount stays behind untracked. */
 function linkup_pause_managed_coupons() {
+    // Runs only on disconnect; coupons are few and the query is bounded.
     $ids = get_posts(array('post_type' => 'shop_coupon', 'post_status' => 'publish', 'numberposts' => 500, 'fields' => 'ids',
-                           'meta_key' => '_linkup_managed', 'meta_value' => '1'));
+                           'meta_key' => '_linkup_managed', 'meta_value' => '1')); // phpcs:ignore WordPress.DB.SlowDBQuery
     foreach ($ids as $id) {
         wp_update_post(array('ID' => $id, 'post_status' => 'draft'));
     }

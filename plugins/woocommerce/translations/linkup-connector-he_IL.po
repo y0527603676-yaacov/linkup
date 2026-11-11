@@ -1,0 +1,80 @@
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: LINKUP Connector 0.4.1\n"
+"Language: he_IL\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid ""
+"Disconnected. LINKUP partner coupons were set to draft; your history in "
+"LINKUP is kept."
+msgstr ""
+"החיבור נותק. קופוני השותפים של LINKUP הועברו לטיוטה; ההיסטוריה ב-LINKUP "
+"נשמרת."
+
+msgid "Connected! Your store is in sync with LINKUP."
+msgstr "מחובר! החנות מסונכרנת עם LINKUP."
+
+msgid ""
+"The key was saved, but the connection failed. Make sure you copied the whole"
+" key."
+msgstr "המפתח נשמר, אבל החיבור נכשל. ודאו שהעתקתם את המפתח המלא."
+
+msgid "Invalid key. Copy it again from LINKUP."
+msgstr "מפתח לא תקין. העתיקו אותו שוב מ-LINKUP."
+
+msgid "Synced."
+msgstr "סונכרן בהצלחה."
+
+msgid "Sync failed."
+msgstr "הסנכרון נכשל."
+
+msgid "Connected ✓"
+msgstr "מחובר ✓"
+
+msgid "Key saved – waiting for the first sync"
+msgstr "המפתח נשמר – ממתין לסנכרון ראשון"
+
+msgid "Not connected"
+msgstr "לא מחובר"
+
+msgid "Status:"
+msgstr "מצב:"
+
+msgid "Last sync:"
+msgstr "סנכרון אחרון:"
+
+msgid "Connection key"
+msgstr "מפתח חיבור"
+
+msgid "(copy it from LINKUP)"
+msgstr "(מעתיקים מ-LINKUP)"
+
+msgid "•••••• (saved). To replace it, paste a new key"
+msgstr "•••••• (שמור). להחלפה, הדביקו מפתח חדש"
+
+msgid "Save and connect"
+msgstr "שמירה וחיבור"
+
+msgid "Sync now"
+msgstr "סנכרון עכשיו"
+
+msgid "Disconnect this store from LINKUP?"
+msgstr "לנתק את החנות מ-LINKUP?"
+
+msgid "Disconnect"
+msgstr "ניתוק"
+
+msgid ""
+"When a visitor arrives through a LINKUP creator link, this plugin sets the "
+"first-party cookie \"linkup_ref\" (creator code and visit time, 30 days) to "
+"credit the sale. Mention it in your cookie notice. If your consent banner "
+"supports the WP Consent API, the cookie is set only after marketing consent."
+msgstr ""
+"כשמבקר מגיע דרך קישור של שותף LINKUP, התוסף שומר בדומיין שלכם את העוגייה "
+"\"linkup_ref\" (קוד השותף ומועד הביקור, 30 יום) כדי לשייך את המכירה. ציינו "
+"אותה בהודעת העוגיות של האתר. אם באנר ההסכמה שלכם תומך ב-WP Consent API, "
+"העוגייה נשמרת רק אחרי הסכמה לשיווק."

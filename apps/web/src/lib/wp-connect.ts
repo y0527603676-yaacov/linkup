@@ -13,6 +13,9 @@ export type WpResult = {
 };
 
 export const PLUGIN_SLUG = "linkup-connector";
+/** Until the plugin is listed on WordPress.org, WordPress cannot install it remotely: the owner uploads the zip once
+ *  (WordPress's own upload page), and the one approval then activates and connects it. Flip after the listing is live. */
+export const PLUGIN_LISTED = process.env.LINKUP_PLUGIN_LISTED === "1";
 export const PLUGIN_FILE = "linkup-connector/linkup-connector";
 const WC_FILE = "woocommerce/woocommerce";
 

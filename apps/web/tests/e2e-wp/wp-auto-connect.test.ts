@@ -1,4 +1,5 @@
 import { createServer, type Server } from "node:http";
+import { execFileSync } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createRequire } from "node:module";
 import type { Browser } from "playwright";
@@ -101,6 +102,7 @@ const newKey = async () => {
 beforeAll(async () => {
   const up = await fetch(SITE).then(async (r) => { await r.arrayBuffer(); return r; }).catch(() => null);
   if (!up) throw new Error(`The isolated WordPress test site is not running at ${SITE} (see tests/e2e-wp/README.md)`);
+  execFileSync("php", ["/var/tmp/wpt/reset.php"]);   // clean test site (site/scripts/reset.php)
   db = await createDb();
   endpoint = startEndpoint();
   returnPage = createServer((req, res) => { lastReturn = req.url ?? ""; res.end("ok"); }).listen(8091, "127.0.0.1");

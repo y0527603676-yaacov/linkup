@@ -24,3 +24,28 @@ running only on this machine. It never touches a real store, LINKUP production, 
 
 ## Run
 `php site/scripts/reset.php && npm run test:wp`
+
+---
+
+# Real WooCommerce store – pilot rehearsal (`wc-real.test.ts`)
+
+Real WordPress 6.5.5 + **official WooCommerce 9.4.2 release** + MariaDB, HPOS order storage, Store API checkout (what the block
+checkout uses), real coupons, cancellations and refunds. Everything on 127.0.0.1; nothing reaches a real store or LINKUP production.
+
+| Part | In the test |
+|---|---|
+| WordPress, WooCommerce, MariaDB, checkout, coupons, refunds, uploads, application passwords | **Real** |
+| LINKUP Connector plugin (release zip) and `lib/wp-connect.ts` | **Real** |
+| LINKUP database functions | **Real** (all migrations, PGlite) |
+| WordPress.org directory entry | Stand-in until the plugin is listed (`real-store/mu-plugins/zz-test-directory.php`) |
+| LINKUP `woo` Edge Function | Emulated in the test (same signature check, same database calls) |
+
+Setup (once):
+1. `apt-get install mariadb-server`; start it; create database `wcreal` / user `wcreal` (test-only password in `real-store/wp-config.php`).
+2. WordPress 6.5.5: unzip `@wp-playground/wordpress-builds` `src/wordpress/wp-6.5.zip` and overlay `public/wp-6.5` (static assets); remove the SQLite drop-in; use `real-store/wp-config.php`.
+3. WooCommerce: `https://github.com/woocommerce/woocommerce/releases/download/9.4.2/woocommerce.zip` into `wp-content/plugins/`.
+4. `php real-store/scripts/install.php && php real-store/scripts/setup-wc.php && php real-store/scripts/setup-shop.php && php real-store/scripts/hpos.php yes`
+5. Copy `real-store/mu-plugins/*` to `wp-content/mu-plugins/`; copy the plugin zip to `<site>/test-dl/linkup-connector.zip`.
+6. `PHP_CLI_SERVER_WORKERS=6 php -S 127.0.0.1:8096` from the site folder.
+
+Run: `npm run test:wp` (runs both suites, one after another; each resets its site first).

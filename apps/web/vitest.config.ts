@@ -3,6 +3,8 @@ import { configDefaults, defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     testTimeout: 30_000, hookTimeout: 60_000,
+    // the WordPress suites share local ports (LINKUP endpoint emulator, return page): run them one after another
+    fileParallelism: !process.env.LINKUP_WP_E2E,
     exclude: process.env.LINKUP_WP_E2E ? configDefaults.exclude : [...configDefaults.exclude, "tests/e2e-wp/**"],
   },
 });

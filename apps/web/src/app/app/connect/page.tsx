@@ -4,19 +4,22 @@ import { errorText, shortDate } from "@/lib/format";
 import { ConnectForm } from "./ConnectForm";
 import { LegalChecks, type PendingDoc } from "@/components/LegalChecks";
 import { startWooApi, syncWooApi, startWpConnect, disconnectStore } from "../actions";
+import { PLUGIN_LISTED } from "@/lib/wp-connect";
 
 export default async function Connect({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const sp = await searchParams;
   const ctx = await loadApp(sp, "store");
   const { sb, org, t, locale } = ctx;
   const l = t.connect;
-  const [{ data: conns }, { data: o }, { data: pend }, { data: apiOpen }, { data: wpOpen }] = await Promise.all([
+  const [{ data: conns }, { data: o }, { data: pend }, { data: apiOpen }, { data: wpOpen }, { data: pubDocs }] = await Promise.all([
     sb.from("store_connections").select("status, site_url, last_sync_at, plugin_version, method, last_error").eq("org_id", org.id).order("created_at", { ascending: false }).limit(1),
     sb.from("organizations").select("website_url").eq("id", org.id).single(),
     sb.rpc("legal_pending", { p_context: "store" }),
     sb.rpc("woo_api_available", { p_org: org.id }),
     sb.rpc("wp_connect_available", { p_org: org.id }),
+    sb.from("legal_documents").select("doc_key").eq("status", "published").in("doc_key", ["store-terms", "privacy", "cookies"]),
   ]);
+  const published = new Set(((pubDocs ?? []) as { doc_key: string }[]).map((d) => d.doc_key));
   const c = conns?.[0] as { status: string; site_url: string; last_sync_at: string | null; plugin_version: string | null; method: string; last_error: string | null } | undefined;
   const legal = (pend ?? []) as PendingDoc[];
   const site = c?.site_url ?? o?.website_url ?? "";
@@ -33,7 +36,7 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
         {sp.ok === "sync" && <Alert kind="ok" text={l.syncStarted} />}
         {sp.ok === "disconnected" && <Alert kind="ok" text={l.disconnect.ok} />}
         {wpResult === "connected" && <Alert kind="ok" text={w.done} />}
-        {wpResult && wpResult !== "connected" && <Alert text={w.errors[wpResult] ?? w.errors.other} />}
+        {wpResult && wpResult !== "connected" && <Alert text={wpResult === "not_in_directory" ? `${w.errors.not_in_directory} ${w.uploadThen}` : (w.errors[wpResult] ?? w.errors.other)} />}
         {sp.wpr === "0" && <Alert text={w.notRevoked} />}
 
         {c && (
@@ -62,8 +65,17 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
           <form action={startWpConnect} className="card stack" style={{ marginTop: 16 }}>
             <input type="hidden" name="org" value={org.id} />
             <div className="row between" style={{ alignItems: "baseline" }}><h3 style={{ margin: 0 }}>{w.title}</h3><span className="badge badge-brand">{w.badge}</span></div>
-            <p className="small" style={{ margin: 0 }}>{w.lead}</p>
-            <ol className="small muted" style={{ margin: 0, paddingInlineStart: 18 }}>{w.steps.map((x) => <li key={x}>{x}</li>)}</ol>
+            <p className="small" style={{ margin: 0 }}>{PLUGIN_LISTED ? w.lead : w.leadManual}</p>
+            <ol className="small muted" style={{ margin: 0, paddingInlineStart: 18 }}>{(PLUGIN_LISTED ? w.steps : w.stepsManual).map((x) => <li key={x}>{x}</li>)}</ol>
+            {!PLUGIN_LISTED && (
+              <div className="stack small" style={{ gap: 6 }}>
+                <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                  <a className="btn btn-ghost btn-sm" href="/downloads/linkup-connector.zip" download>{w.download}</a>
+                  {site && /^https:\/\//.test(site) && <a className="btn btn-ghost btn-sm" href={`${site.replace(/\/+$/, "")}/wp-admin/plugin-install.php?tab=upload`} target="_blank" rel="noopener">{w.openUpload}</a>}
+                </div>
+                <p className="muted" style={{ margin: 0 }}>{w.uploadHow}</p>
+              </div>
+            )}
             <label className="field"><span>{l.site}</span>
               <input name="site" required dir="ltr" inputMode="url" placeholder="https://myshop.co.il" defaultValue={site} /></label>
             <fieldset className="stack" style={{ border: 0, padding: 0, margin: 0, gap: 8 }}>
@@ -82,7 +94,10 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
               <label className="row small" style={{ alignItems: "flex-start", gap: 8, flexWrap: "nowrap" }}><input style={{ width: "auto", marginTop: 2, flex: "none" }} type="radio" name="mode" value="require" /> <span>{w.modeRequire}</span></label>
               <p className="small muted" style={{ margin: 0 }}>{w.modeHint}</p>
             </fieldset>
-            <p className="small" style={{ margin: 0 }}>{w.docsLead} <a href="/legal/store-terms" target="_blank">{w.docTerms}</a> · <a href="/legal/privacy" target="_blank">{w.docPrivacy}</a> · <a href="/legal/cookies" target="_blank">{w.docCookies}</a></p>
+            {published.size > 0
+              ? <p className="small" style={{ margin: 0 }}>{w.docsLead} {([["store-terms", w.docTerms], ["privacy", w.docPrivacy], ["cookies", w.docCookies]] as const)
+                  .filter(([k]) => published.has(k)).map(([k, label], i) => <span key={k}>{i > 0 ? " · " : ""}<a href={`/legal/${k}`} target="_blank">{label}</a></span>)}</p>
+              : <p className="small muted" style={{ margin: 0 }}>{w.docsPending}</p>}
             <LegalChecks docs={legal} locale={locale} label={t.lc.store} />
             <button className="btn btn-primary">{w.cta}</button>
             <p className="small muted" style={{ margin: 0 }}>{w.needAdmin} {w.recorded}</p>

@@ -31,6 +31,7 @@ function set_url_scheme($u, $s) { return preg_replace('#^http://#', 'https://', 
 function get_woocommerce_currency() { return 'ILS'; }
 function wc_get_product_terms($id, $tax, $a) { return ['טבעות']; }
 function get_post_type($id) { return 'product'; }
+function load_plugin_textdomain(...$a) { return true; } function plugin_basename($f) { return 'linkup-connector/linkup-connector.php'; } function __($t, $d = null) { return $t; }
 $GLOBALS['coupon_posts'] = [];
 function get_posts($a) { return array_keys(array_filter($GLOBALS['coupon_posts'], fn($c) => $c['status'] === ($a['post_status'] ?? 'publish') && ($c['meta']['_linkup_managed'] ?? '') === '1')); }
 function wp_update_post($a) { $GLOBALS['coupon_posts'][$a['ID']]['status'] = $a['post_status']; return $a['ID']; }
