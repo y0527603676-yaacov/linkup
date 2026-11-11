@@ -15,7 +15,7 @@ export const shortDate = (iso: string | null | undefined, locale: Loc = "he") =>
 
 const KNOWN = new Set(["https_required", "consent_required", "invalid_state", "not_available", "test_isolation", "email_in_use", "too_many", "not_found", 
   "forbidden", "not_authenticated", "invalid_url", "invalid_name", "invalid_type", "proposal_closed", "proposal_expired",
-  "wrong_org_type", "rate_limited", "not_found", "too_many_orgs", "activity_rate_limited", "order_exists", "already_connected", "unsupported_org_type", "not_a_store", "not_a_creator",
+  "wrong_org_type", "rate_limited", "not_found", "too_many_orgs", "activity_rate_limited", "already_connected", "consent_required", "invalid_phone", "help_already_requested", "unsupported_org_type", "not_a_store", "not_a_creator",
   "bad_code", "email", "send_failed", "invalid_email", "invalid_role", "last_owner", "invite_invalid", "invite_email_mismatch",
   "opportunity_closed", "self_deal", "already_decided", "invalid_dates", "too_many_campaigns", "store_not_connected",
   "nothing_to_pay", "creator_tax_undetermined", "vat_mismatch", "reason_required", "already_responded", "invalid_status", "below_minimum", "invoice_not_payable", "invoice_not_voidable", "store_rate_not_accepted", "invoice_not_disputable", "dispute_open", "invalid_amount", "too_many", "invalid_input", "not_withdrawable", "not_disputed", "charge_in_progress", "charge_outcome_unknown", "no_payment_method", "notice_not_delivered", "wind_down_rule_undecided", "wind_down_not_allowed", "wind_down_not_due", "accounting_decision_pending",

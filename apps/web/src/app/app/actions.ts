@@ -510,3 +510,27 @@ export async function answerSaleClaim(form: FormData) {
   const { error } = await sb.rpc("answer_sale_claim", { p_claim: str(form, "claim"), p_status: str(form, "status"), p_response: str(form, "response") || null });
   redirect(back("/app/claims", org, error ? { error: errorCode(error) } : { ok: "answered" }));
 }
+
+/* ---------- Connect help ---------- */
+export async function requestConnectHelp(form: FormData) {
+  const org = str(form, "org");
+  const sb = await getSupabase();
+  const { error } = await sb.rpc("request_connect_help", {
+    p_org: org, p_channel: str(form, "channel"), p_phone: str(form, "phone"), p_preferred_time: str(form, "time") || null,
+    p_note: str(form, "note") || null, p_site: str(form, "site") || null, p_platform: str(form, "platform") || null,
+    p_consent_remote: str(form, "consent") === "1",
+  });
+  redirect(back("/app/connect/help", org, error ? { error: errorCode(error), site: str(form, "site"), p: str(form, "platform") } : { ok: "sent" }));
+}
+export async function cancelConnectHelp(form: FormData) {
+  const org = str(form, "org");
+  const sb = await getSupabase();
+  const { error } = await sb.rpc("close_connect_help", { p_id: str(form, "id"), p_status: "cancelled" });
+  redirect(back("/app/connect/help", org, error ? { error: errorCode(error) } : {}));
+}
+export async function adminCloseConnectHelp(form: FormData) {
+  const org = str(form, "org");
+  const sb = await getSupabase();
+  const { error } = await sb.rpc("close_connect_help", { p_id: str(form, "id"), p_status: "done" });
+  redirect(back("/app/admin", org, error ? { error: errorCode(error), tab: "overview" } : { tab: "overview" }));
+}

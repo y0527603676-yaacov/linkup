@@ -35,8 +35,8 @@ export default async function ConnectApi({ searchParams }: { searchParams: Promi
             <p className="alert alert-warn small" style={{ margin: 0 }}>{a.keyOnce}</p>
             <div className="keybox" dir="ltr">{key}</div>
             <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-              <CopyButton text={key} label={t.connect.copyKey} done={t.common.copied} className="btn btn-primary btn-sm" />
-              <CopyButton text={a.devMsg(key, guide)} label={a.forDev} done={t.common.copied} />
+              <CopyButton text={a.devMsg(key, guide)} label={a.forDev} done={t.common.copied} className="btn btn-primary btn-sm" />
+              <CopyButton text={key} label={t.connect.copyKey} done={t.common.copied} />
             </div>
           </section>
         )}
@@ -58,7 +58,8 @@ export default async function ConnectApi({ searchParams }: { searchParams: Promi
           {c && <p className="small muted" style={{ margin: 0 }}>{a.rotateNote}</p>}
         </form>
 
-        <p className="small" style={{ marginTop: 16 }}><Link href="/developers" target="_blank">{a.guide} ↗</Link></p>
+        <p className="small" style={{ marginTop: 16 }}>{u.help.need} <Link href={`/app/connect/help?${new URLSearchParams({ org: org.id, site: c?.site_url ?? "", p: "custom" })}`}>{u.help.cta}</Link>
+          {" · "}<Link href="/developers" target="_blank">{a.guide} ↗</Link></p>
         <p className="small muted">{a.trust}</p>
       </div>
     </AppShell>

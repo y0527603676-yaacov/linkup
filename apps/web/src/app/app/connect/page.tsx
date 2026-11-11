@@ -48,6 +48,14 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
   const pluginReady = !!d?.linkupPlugin;
   const restBlocked = !!d?.restBlocked;
   const manualOnly = restBlocked;
+  // Measurement (host only): what was detected, and why a connection could not continue.
+  if (d) {
+    const fail = !d.ok ? d.error : rdFrom ? "redirected" : platform === "wordpress" ? "no_woocommerce"
+      : ["shopify", "wix", "magento"].includes(platform) ? "unsupported_platform" : wantManual && adminOk === false ? "no_wp_admin" : null;
+    await sb.rpc("log_connect_event", { p_org: org.id, p_event: "detected", p_site: d.url || checkSite, p_platform: d.ok ? platform : null });
+    if (fail) await sb.rpc("log_connect_event", { p_org: org.id, p_event: "failed", p_site: d.url || checkSite, p_platform: d.ok ? platform : null, p_reason: fail });
+  }
+  if (sp.error) await sb.rpc("log_connect_event", { p_org: org.id, p_event: "failed", p_site: site || null, p_platform: null, p_reason: String(sp.error).slice(0, 64) });
   const primary: "wp" | "api" | "manual" = manualOnly ? "manual" : wpAvail ? "wp" : api ? "api" : "manual";
   const Prereqs = () => (
     <div className="small" style={{ margin: 0 }}>
@@ -57,10 +65,13 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
   );
   const u = t.uc;
   /** The other automatic way to connect (custom sites); if neither fits, the site cannot be tracked yet. */
+  const helpHref = `/app/connect/help?${new URLSearchParams({ org: org.id, site: dsite, p: platform || "" })}`;
+  const guideHref = `/app/connect/guide?${new URLSearchParams({ org: org.id, site: dsite })}`;
   const Alternatives = () => (
     <div className="stack" style={{ gap: 10, marginTop: 4 }}>
       <div className="card card-flat stack" style={{ gap: 6 }}>
         <b>{u.api.t}</b><p className="small muted" style={{ margin: 0 }}>{u.api.d}</p>
+        <a className="btn btn-primary btn-sm" href={helpHref}>{u.help.cta}</a>
         <a className="btn btn-ghost btn-sm" href={`/app/connect/api?${new URLSearchParams({ org: org.id, site: dsite })}`}>{u.api.cta}</a>
       </div>
       <p className="small muted" style={{ margin: 0 }}>{u.noAuto}</p>
@@ -263,6 +274,11 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
             )}
           </section>
         )}
+          {!(c && c.status === "connected") && (
+            <p className="small" style={{ marginTop: 12 }}>{u.help.need}{" "}
+              {(!platform || platform === "woocommerce") && <><a href={guideHref}>{u.help.guideCta}</a>{" · "}</>}
+              <a href={helpHref}>{u.help.cta}</a></p>
+          )}
 
         {c && c.status !== "disconnected" && (
           <details className="card card-flat" style={{ marginTop: 16 }}>

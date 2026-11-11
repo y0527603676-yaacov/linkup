@@ -5,7 +5,7 @@ import { AppShell, PageHead, Alert, Stat } from "@/components/AppShell";
 import { loadApp } from "@/lib/orgs";
 import { errorText, money, shortDate } from "@/lib/format";
 import { Overview } from "./Overview";
-import { adminAction } from "../actions";
+import { adminAction, adminCloseConnectHelp } from "../actions";
 
 export default async function Admin({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const sp = await searchParams;
@@ -20,6 +20,9 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
   const tab = ["overview", "orgs", "finance", "settings"].includes(sp.tab ?? "") ? sp.tab! : "overview";
   const { data: pov } = tab === "overview" || tab === "orgs" ? await sb.rpc("admin_pilot_overview", { p_include_test: sp.test === "1" }) : { data: null };
   const { data: ts } = await sb.rpc("admin_test_signups");
+  const [{ data: cf }, { data: chq }] = tab === "overview" ? await Promise.all([sb.rpc("connect_funnel_stats", { p_days: 30 }), sb.rpc("admin_connect_help")]) : [{ data: null }, { data: null }];
+  const ac = t.uc.adminConnect; const C = (cf ?? null) as Record<string, any> | null; const helpReqs = (chq ?? []) as any[];
+  const share = (n: number, d: number) => (d ? `${Math.round((n / d) * 100)}%` : "—");
   const testSignups = (ts ?? []) as { email: string; note: string | null; registered: boolean }[];
   const F = (fd ?? {}) as Record<string, any>;
   const exceptions = (exq ?? []) as any[];
@@ -50,6 +53,29 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
         {(["overview", "orgs", "finance", "settings"] as const).map((k) => (
           <Link key={k} className={`tab${tab === k ? " on" : ""}`} href={`/app/admin?org=${org.id}&tab=${k}`} aria-current={tab === k ? "page" : undefined}>{a.tabs[k]}</Link>))}
       </nav>
+      {tab === "overview" && C && (
+        <section className="section"><H>{ac.title}</H>
+          <div className="stats">
+            <Stat label={ac.started} value={String(C.stores_started)} />
+            <Stat label={ac.connected} value={String(C.connected)} />
+            <Stat label={`${ac.self} (${ac.ofConnected})`} value={share(C.connected_self, C.connected)} />
+            <Stat label={ac.notConnected} value={String(C.not_connected)} />
+          </div>
+          <p className="small muted">{ac.target} · {ac.guided}: {C.connected_guided} · {ac.assisted}: {C.connected_assisted}</p>
+          {Object.keys(C.unsupported ?? {}).length > 0 && <p className="small">{ac.unsupported}: {Object.entries(C.unsupported).map(([k, v]) => `${k} ${v}`).join(" · ")}</p>}
+          {(C.failure_reasons ?? []).length > 0 && <p className="small">{ac.reasons}: {(C.failure_reasons as any[]).map((r) => `${r.reason} (${r.stores})`).join(" · ")}</p>}
+          <h3 style={{ marginBottom: 6 }}>{ac.help}</h3>
+          {!helpReqs.length && <p className="small muted">{ac.noHelp}</p>}
+          {helpReqs.map((h) => (
+            <div key={h.id} className="card card-flat row between" style={{ gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+              <span className="small"><b>{h.org}</b> · {t.uc.help.channels[h.channel]} · <span className="ltr">{h.phone}</span>{h.preferred_time && <> · {h.preferred_time}</>}
+                {h.site_host && <> · <span className="ltr">{h.site_host}</span></>}{h.platform && <> · {h.platform}</>}{h.note && <><br />{h.note}</>}</span>
+              <form action={adminCloseConnectHelp}><input type="hidden" name="org" value={org.id} /><input type="hidden" name="id" value={h.id} />
+                <button className="btn btn-ghost btn-sm">{ac.done}</button></form>
+            </div>
+          ))}
+        </section>
+      )}
       {tab === "overview" && pov && <Overview o={pov as any} a={a} locale={locale} orgParam={org.id} />}
 
       {tab === "finance" && <>
