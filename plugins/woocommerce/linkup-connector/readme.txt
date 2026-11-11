@@ -71,9 +71,16 @@ The plugin stops sending data. Partner coupons it created are set to draft (not 
 
 See "External service" above. No customer names, addresses, phone numbers or payment details.
 
+== Screenshots ==
+
+1. The LINKUP page in WooCommerce: connection status, last sync and the cookie notice.
+2. WordPress's own approval page. LINKUP receives a temporary application password, never your password.
+3. The approval screen in LINKUP: what will be installed, the temporary access and the visitor cookie, each with details.
+
 == Changelog ==
 
 = 0.4.1 =
+* First public release on WordPress.org.
 * Visitor consent: respects the WP Consent API (marketing), or the store's own setting (notice / require).
 * Block checkout (Store API) support for referrals.
 * The plugin stops by itself when the store disconnects in LINKUP.

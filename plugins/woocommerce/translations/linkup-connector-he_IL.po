@@ -2,12 +2,18 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: LINKUP Connector 0.4.1\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-11-11T00:34:24+00:00\n"
+"PO-Revision-Date: 2026-11-11T00:34:24+00:00\n"
+"Last-Translator: \n"
+"Language-Team: \n"
 "Language: he_IL\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
+#: linkup-connector.php:432
 msgid ""
 "Disconnected. LINKUP partner coupons were set to draft; your history in "
 "LINKUP is kept."
@@ -15,59 +21,77 @@ msgstr ""
 "החיבור נותק. קופוני השותפים של LINKUP הועברו לטיוטה; ההיסטוריה ב-LINKUP "
 "נשמרת."
 
+#: linkup-connector.php:437
 msgid "Connected! Your store is in sync with LINKUP."
 msgstr "מחובר! החנות מסונכרנת עם LINKUP."
 
+#: linkup-connector.php:438
 msgid ""
 "The key was saved, but the connection failed. Make sure you copied the whole"
 " key."
 msgstr "המפתח נשמר, אבל החיבור נכשל. ודאו שהעתקתם את המפתח המלא."
 
+#: linkup-connector.php:440
 msgid "Invalid key. Copy it again from LINKUP."
 msgstr "מפתח לא תקין. העתיקו אותו שוב מ-LINKUP."
 
+#: linkup-connector.php:444
 msgid "Synced."
 msgstr "סונכרן בהצלחה."
 
+#: linkup-connector.php:444
 msgid "Sync failed."
 msgstr "הסנכרון נכשל."
 
+#: linkup-connector.php:450
 msgid "Connected ✓"
 msgstr "מחובר ✓"
 
+#: linkup-connector.php:450
 msgid "Key saved – waiting for the first sync"
 msgstr "המפתח נשמר – ממתין לסנכרון ראשון"
 
+#: linkup-connector.php:451
 msgid "Not connected"
 msgstr "לא מחובר"
 
+#: linkup-connector.php:456
 msgid "Status:"
 msgstr "מצב:"
 
+#: linkup-connector.php:457
 msgid "Last sync:"
 msgstr "סנכרון אחרון:"
 
+#: linkup-connector.php:460
 msgid "Connection key"
 msgstr "מפתח חיבור"
 
+#: linkup-connector.php:460
 msgid "(copy it from LINKUP)"
 msgstr "(מעתיקים מ-LINKUP)"
 
+#: linkup-connector.php:462
 msgid "•••••• (saved). To replace it, paste a new key"
 msgstr "•••••• (שמור). להחלפה, הדביקו מפתח חדש"
 
+#: linkup-connector.php:463
 msgid "Save and connect"
 msgstr "שמירה וחיבור"
 
+#: linkup-connector.php:464
 msgid "Sync now"
 msgstr "סנכרון עכשיו"
 
+#: linkup-connector.php:465
 msgid "Disconnect this store from LINKUP?"
 msgstr "לנתק את החנות מ-LINKUP?"
 
+#: linkup-connector.php:465
 msgid "Disconnect"
 msgstr "ניתוק"
 
+#: linkup-connector.php:467
 msgid ""
 "When a visitor arrives through a LINKUP creator link, this plugin sets the "
 "first-party cookie \"linkup_ref\" (creator code and visit time, 30 days) to "
@@ -78,3 +102,22 @@ msgstr ""
 "\"linkup_ref\" (קוד השותף ומועד הביקור, 30 יום) כדי לשייך את המכירה. ציינו "
 "אותה בהודעת העוגיות של האתר. אם באנר ההסכמה שלכם תומך ב-WP Consent API, "
 "העוגייה נשמרת רק אחרי הסכמה לשיווק."
+
+#. Plugin Name of the plugin
+#: linkup-connector.php
+msgid "LINKUP Connector"
+msgstr "LINKUP Connector"
+
+#. Description of the plugin
+#: linkup-connector.php
+msgid ""
+"Connects your WooCommerce store to LINKUP: personal coupons for creators, "
+"30-day referral tracking and secure sales reporting."
+msgstr ""
+"מחבר את חנות ה-WooCommerce ל-LINKUP: קופונים אישיים למשפיענים, מעקב הפניות "
+"של 30 יום ודיווח מכירות מאובטח."
+
+#. Author of the plugin
+#: linkup-connector.php
+msgid "LINKUP"
+msgstr "LINKUP"
