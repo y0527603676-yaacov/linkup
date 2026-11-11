@@ -18,6 +18,8 @@ export type Config = {
   wixAppId?: string; wixSecret?: string; wixPublicKey?: string;
   functionsBase: string;   // https://<project>.supabase.co/functions/v1/apps
   appBase: string;         // https://linkup… (where the owner returns)
+  cronSecret?: string;     // protects the periodic sync route
+  sleep?: (ms: number) => Promise<void>;   // injectable for tests
 };
 export type Reply = { status: number; body?: unknown; redirect?: string };
 
@@ -69,6 +71,35 @@ export function toMinor(v: unknown, currency: string): number {
   const n = Number(i) * 10 ** dec + Number((f + "00").slice(0, dec) || 0) + (Number(f[dec] ?? 0) >= 5 ? 1 : 0);
   return s.startsWith("-") ? -n : n;
 }
+/* ---------- retries: platform rate limits (429) and temporary errors (5xx / network) ---------- */
+export function retrying(fetchFn: Fetch, sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)), attempts = 3): Fetch {
+  return async (url, init) => {
+    let last: Awaited<ReturnType<Fetch>> | null = null;
+    for (let i = 0; i < attempts; i++) {
+      try {
+        last = await fetchFn(url, init);
+        if (last.status !== 429 && last.status < 500) return last;
+      } catch (e) { if (i === attempts - 1) throw e; }
+      if (i < attempts - 1) await sleep(Math.min(4000, 500 * 2 ** i));
+    }
+    return last!;
+  };
+}
+
+/* ---------- personal link → ref ("CODE|unix time of the visit") ---------- */
+const CODE_RE = /^[A-Za-z0-9]{4,16}$/;
+export const REF_RE = /^[A-Za-z0-9]{4,16}\|\d{9,11}$/;
+/** Reads LINKUP's link parameters (lku = creator code, lkt = visit time) from a landing URL, also when URL-encoded
+ *  (e.g. inside Shopify's /discount/CODE?redirect=… landing page). */
+export function refFromUrl(u: unknown): { code: string; at: number | null } | null {
+  let s = String(u ?? ""); if (!s || s.length > 4000) return null;
+  for (let i = 0; i < 3; i++) { try { const d = decodeURIComponent(s.replace(/\+/g, " ")); if (d === s) break; s = d; } catch { break; } }
+  const m = s.match(/[?&]lku=([A-Za-z0-9]{4,16})(?![A-Za-z0-9])/); if (!m) return null;
+  const t = s.match(/[?&]lkt=(\d{9,11})(?!\d)/);
+  return { code: m[1]!, at: t ? Number(t[1]) : null };
+}
+const refString = (code: string, at: number | null) => (CODE_RE.test(code) && at && at > 1e9 ? `${code}|${Math.floor(at)}` : "");
+
 export type NormalizedOrder = { id: string; status: string; currency: string; total: number; tax: number; shipping: number; shipping_tax: number;
   coupons: string[]; ref: string; email_hash: string; created_at: string; refunds: { id: string; amount: number }[] };
 
@@ -77,13 +108,16 @@ export function shopifyOrder(o: any, emailHash = ""): NormalizedOrder | null {
   const cur = String(o.currency).toUpperCase(); const fs = o.financial_status ?? "";
   const status = o.cancelled_at || fs === "voided" ? "cancelled" : fs === "refunded" ? "refunded"
     : ["paid", "partially_refunded"].includes(fs) ? (o.fulfillment_status === "fulfilled" ? "completed" : "processing") : "pending";
-  const ref = (o.note_attributes ?? []).find((a: any) => a?.name === "linkup_ref")?.value ?? "";
+  // 1) cart attribute set by the LINKUP theme app embed, 2) the landing page Shopify recorded for the order.
+  const attr = String((o.note_attributes ?? []).find((a: any) => a?.name === "linkup_ref")?.value ?? "");
+  const land = refFromUrl(o.landing_site);
+  const ref = REF_RE.test(attr) ? attr : land ? refString(land.code, land.at) : "";
   return {
     id: String(o.id), status, currency: cur, total: toMinor(o.total_price, cur), tax: toMinor(o.total_tax, cur),
     shipping: toMinor(o.total_shipping_price_set?.shop_money?.amount, cur),
     shipping_tax: (o.shipping_lines ?? []).flatMap((l: any) => l.tax_lines ?? []).reduce((s: number, t: any) => s + toMinor(t.price, cur), 0),
     coupons: (o.discount_codes ?? []).map((d: any) => String(d?.code ?? "")).filter(Boolean),
-    ref: /^[A-Za-z0-9]{4,16}\|\d{9,11}$/.test(ref) ? ref : "", email_hash: emailHash,
+    ref, email_hash: emailHash,
     created_at: o.created_at ?? new Date().toISOString(),
     refunds: (o.refunds ?? []).map((r: any) => ({ id: String(r.id), amount: (r.transactions ?? [])
       .filter((t: any) => t.kind === "refund" && t.status === "success").reduce((s: number, t: any) => s + toMinor(t.amount, cur), 0) }))
@@ -100,8 +134,22 @@ export function wixOrder(o: any): NormalizedOrder | null {
     shipping: toMinor(o.priceSummary?.shipping?.amount, cur), shipping_tax: 0,
     coupons: (o.appliedDiscounts ?? []).map((d: any) => String(d?.coupon?.code ?? "")).filter(Boolean),
     ref: "", email_hash: "", created_at: o.createdDate ?? new Date().toISOString(),
-    refunds: o.paymentStatus === "FULLY_REFUNDED" ? [{ id: "full", amount: total }] : [],
+    refunds: wixRefunds(o, cur, total),
   };
+}
+/** Refunds from the order's activities (initiated refunds that did not fail, manual refunds); a fully refunded order
+ *  always counts in full. The engine caps the sum at the order total, so overlaps can't over-refund. */
+function wixRefunds(o: any, cur: string, total: number) {
+  const acts: any[] = Array.isArray(o.activities) ? o.activities : [];
+  const failed = new Set(acts.filter((a) => a?.type === "PAYMENT_REFUND_FAILED").map((a) => a?.paymentRefundFailed?.refundId).filter(Boolean));
+  const out: { id: string; amount: number }[] = [];
+  for (const a of acts) {
+    if (a?.type === "REFUND_INITIATED" && a.refundInitiated?.refundId && !failed.has(a.refundInitiated.refundId))
+      out.push({ id: `r:${a.refundInitiated.refundId}`, amount: toMinor(a.refundInitiated.amount?.amount, cur) });
+    else if (a?.type === "ORDER_REFUNDED" && a.id) out.push({ id: `m:${a.id}`, amount: toMinor(a.orderRefunded?.amount?.amount, cur) });
+  }
+  if (o.paymentStatus === "FULLY_REFUNDED") out.push({ id: "full", amount: total });
+  return out.filter((r) => r.amount > 0);
 }
 
 /* ---------- Shopify ---------- */
@@ -109,6 +157,10 @@ const gql = (fetchFn: Fetch, cfg: Config, shop: string, token: string, query: st
   fetchFn(`https://${shop}/admin/api/${cfg.shopifyApiVersion ?? "2026-07"}/graphql.json`, {
     method: "POST", headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": token }, body: JSON.stringify({ query, variables }),
   });
+const gqlJson = async (fetchFn: Fetch, cfg: Config, shop: string, token: string, query: string, variables: Record<string, unknown> = {}) => {
+  const r = await gql(fetchFn, cfg, shop, token, query, variables);
+  return r.ok ? await r.json().catch(() => null) : null;
+};
 
 export function shopifyInstallUrl(cfg: Config, shop: string, state: string): string | null {
   if (!SHOP_RE.test(shop) || !cfg.shopifyKey) return null;
@@ -118,7 +170,8 @@ export function shopifyInstallUrl(cfg: Config, shop: string, state: string): str
 
 const back = (cfg: Config, params: Record<string, string>) => `${cfg.appBase}/app/connect?${new URLSearchParams(params)}`;
 
-export async function shopifyCallback(rpc: Rpc, fetchFn: Fetch, cfg: Config, params: URLSearchParams): Promise<Reply> {
+export async function shopifyCallback(rpc: Rpc, fetchRaw: Fetch, cfg: Config, params: URLSearchParams): Promise<Reply> {
+  const fetchFn = retrying(fetchRaw, cfg.sleep);
   const shop = (params.get("shop") ?? "").toLowerCase(); const state = params.get("state") ?? ""; const code = params.get("code") ?? "";
   if (!SHOP_RE.test(shop) || !state || !code || !(await verifyShopifyQuery(params, cfg.shopifySecret ?? ""))) {
     return { status: 302, redirect: back(cfg, { error: "app_install_failed" }) };
@@ -141,46 +194,109 @@ export async function shopifyCallback(rpc: Rpc, fetchFn: Fetch, cfg: Config, par
   return { status: 302, redirect: back(cfg, verified ? { org, ok: "app_connected" } : { org, error: "app_not_verified" }) };
 }
 
-/** Real API call to the shop + webhooks + coupons; only then "connected". */
+/** Real API call to the shop; only after it succeeds is the store "connected" (plugin_sync), then coupons are synced. */
+async function shopifyVerifyAndSync(rpc: Rpc, fetchFn: Fetch, cfg: Config, conn: string, withProducts: boolean) {
+  const c = (await rpc("app_credentials", { p_connection: conn })).data as { shop: string; token: string } | null;
+  if (!c || !c.token || c.token === "revoked") return { ok: false as const, reason: "no_credentials" };
+  const j = await gqlJson(fetchFn, cfg, c.shop, c.token, "{ shop { myshopifyDomain primaryDomain { url } currencyCode } }");
+  if (!j?.data?.shop?.myshopifyDomain) return { ok: false as const, reason: "shop_unreachable", c };
+  const sync = await rpc("plugin_sync", { p_connection: conn, p_plugin_version: "shopify-app" });
+  if (sync.error) return { ok: false as const, reason: "sync_failed", c };
+  const coupons = await shopifySyncCoupons(fetchFn, cfg, c.shop, c.token, (sync.data?.coupons ?? []) as Coupon[],
+    (code, id, active) => rpc("app_coupon_mark", { p_connection: conn, p_code: code, p_external_id: id, p_active: active }).then(() => undefined));
+  const products = withProducts ? await shopifySyncProducts(rpc, fetchFn, cfg, conn, c.shop, c.token) : null;
+  return { ok: true as const, c, coupons, products };
+}
+
 export async function shopifyActivate(rpc: Rpc, fetchFn: Fetch, cfg: Config, conn: string): Promise<boolean> {
   const c = (await rpc("app_credentials", { p_connection: conn })).data as { shop: string; token: string } | null;
   if (!c) return false;
-  const r = await gql(fetchFn, cfg, c.shop, c.token, "{ shop { myshopifyDomain primaryDomain { url } currencyCode } }");
-  const j = r.ok ? await r.json() : null;
+  const j = await gqlJson(fetchFn, cfg, c.shop, c.token, "{ shop { myshopifyDomain primaryDomain { url } currencyCode } }");
   if (!j?.data?.shop?.myshopifyDomain) return false;
   for (const topic of SHOPIFY_TOPICS) {
     await gql(fetchFn, cfg, c.shop, c.token,
       `mutation($topic: WebhookSubscriptionTopic!, $url: URL!) { webhookSubscriptionCreate(topic: $topic, webhookSubscription: { callbackUrl: $url, format: JSON }) { userErrors { message } } }`,
       { topic, url: `${cfg.functionsBase}/shopify/webhook` });
   }
-  const sync = await rpc("plugin_sync", { p_connection: conn, p_plugin_version: "shopify-app" });
-  if (sync.error) return false;
-  await shopifySyncCoupons(fetchFn, cfg, c.shop, c.token, (sync.data?.coupons ?? []) as Coupon[]);
-  return true;
+  const r = await shopifyVerifyAndSync(rpc, fetchFn, cfg, conn, true);
+  return r.ok;
 }
 
 type Coupon = { code: string; discount_pct: number; active: boolean };
-/** Creates missing partner coupons in the shop and deactivates coupons LINKUP turned off. Never touches other discounts. */
-export async function shopifySyncCoupons(fetchFn: Fetch, cfg: Config, shop: string, token: string, coupons: Coupon[]) {
-  const out = { created: 0, deactivated: 0, kept: 0 };
+type Mark = (code: string, externalId: string | null, active: boolean) => Promise<void>;
+/** Creates missing partner coupons in the shop and deactivates coupons LINKUP turned off. Never touches other discounts.
+ *  Records which codes really exist in the shop (used for the auto-applied discount link). */
+export async function shopifySyncCoupons(fetchFn: Fetch, cfg: Config, shop: string, token: string, coupons: Coupon[], mark?: Mark) {
+  const out = { created: 0, deactivated: 0, kept: 0, failed: 0, skipped: 0 };
   for (const cp of coupons) {
-    const q = await gql(fetchFn, cfg, shop, token, `query($code: String!) { codeDiscountNodeByCode(code: $code) { id codeDiscount { ... on DiscountCodeBasic { status title } } } }`, { code: cp.code });
-    const node = q.ok ? (await q.json())?.data?.codeDiscountNodeByCode : null;
+    if (!CODE_RE.test(cp.code)) { out.skipped++; continue; }
+    const q = await gqlJson(fetchFn, cfg, shop, token, `query($code: String!) { codeDiscountNodeByCode(code: $code) { id codeDiscount { ... on DiscountCodeBasic { status title } } } }`, { code: cp.code });
+    if (!q?.data) { out.failed++; continue; }   // unknown state → don't risk a duplicate; next sync retries
+    const node = q.data.codeDiscountNodeByCode; const ours = String(node?.codeDiscount?.title ?? "").startsWith("LINKUP ");
     if (!node && cp.active) {
-      await gql(fetchFn, cfg, shop, token,
-        `mutation($d: DiscountCodeBasicInput!) { discountCodeBasicCreate(basicCodeDiscount: $d) { userErrors { message } } }`,
+      if (!(cp.discount_pct > 0)) { out.skipped++; await mark?.(cp.code, null, false); continue; }   // no customer discount → nothing to create
+      const r = await gqlJson(fetchFn, cfg, shop, token,
+        `mutation($d: DiscountCodeBasicInput!) { discountCodeBasicCreate(basicCodeDiscount: $d) { codeDiscountNode { id } userErrors { message } } }`,
         { d: { title: `LINKUP ${cp.code}`, code: cp.code, startsAt: new Date().toISOString(), customerSelection: { all: true },
-               customerGets: { value: { percentage: Math.max(0, Math.min(100, cp.discount_pct)) / 100 }, items: { all: true } } } });
-      out.created++;
-    } else if (node && !cp.active && String(node.codeDiscount?.title ?? "").startsWith("LINKUP ")) {
-      await gql(fetchFn, cfg, shop, token, `mutation($id: ID!) { discountCodeDeactivate(id: $id) { userErrors { message } } }`, { id: node.id });
-      out.deactivated++;
-    } else out.kept++;
+               customerGets: { value: { percentage: Math.min(100, cp.discount_pct) / 100 }, items: { all: true } } } });
+      const res = r?.data?.discountCodeBasicCreate;
+      if (!res || (res.userErrors ?? []).length) { out.failed++; continue; }
+      out.created++; await mark?.(cp.code, res.codeDiscountNode?.id ?? null, true);
+    } else if (node && !cp.active && ours) {
+      const r = await gqlJson(fetchFn, cfg, shop, token, `mutation($id: ID!) { discountCodeDeactivate(id: $id) { userErrors { message } } }`, { id: node.id });
+      if (!r?.data || (r.data.discountCodeDeactivate?.userErrors ?? []).length) { out.failed++; continue; }
+      out.deactivated++; await mark?.(cp.code, node.id, false);
+    } else {
+      out.kept++;
+      if (node) await mark?.(cp.code, node.id, cp.active && ours && String(node.codeDiscount?.status ?? "ACTIVE") === "ACTIVE");
+    }
   }
   return out;
 }
 
-export async function shopifyWebhook(rpc: Rpc, cfg: Config, headers: { get(k: string): string | null }, raw: string): Promise<Reply> {
+/** Catalog for creators (title, link, image, price, stock). Full sync only when every page was read. */
+export async function shopifySyncProducts(rpc: Rpc, fetchFn: Fetch, cfg: Config, conn: string, shop: string, token: string) {
+  const started = new Date().toISOString(); let after: string | null = null; let n = 0; let complete = false;
+  for (let page = 0; page < 10; page++) {
+    const j = await gqlJson(fetchFn, cfg, shop, token, `query($after: String) { products(first: 100, after: $after, query: "status:active") {
+      nodes { id title onlineStoreUrl featuredImage { url } totalInventory tracksInventory priceRangeV2 { minVariantPrice { amount currencyCode } } }
+      pageInfo { hasNextPage endCursor } } }`, { after });
+    const p = j?.data?.products; if (!p) break;
+    const rows = (p.nodes ?? []).map((x: any) => {
+      const cur = String(x.priceRangeV2?.minVariantPrice?.currencyCode ?? "").toUpperCase();
+      return { id: String(x.id).split("/").pop(), name: x.title, url: x.onlineStoreUrl ?? null, image: x.featuredImage?.url ?? null,
+        price: String(toMinor(x.priceRangeV2?.minVariantPrice?.amount, cur)), currency: cur,
+        in_stock: x.tracksInventory ? Number(x.totalInventory ?? 0) > 0 : true,
+        stock_qty: x.tracksInventory ? String(x.totalInventory ?? 0) : null, status: "publish" };
+    });
+    const last = !p.pageInfo?.hasNextPage;
+    if (rows.length || (last && after === null)) {
+      const r = await rpc("plugin_sync_products", { p_connection: conn, p_products: rows, p_full_started_at: last && after === null ? started : null });
+      if (r.error) break; n += rows.length;
+    }
+    if (last) { complete = true; break; }
+    after = p.pageInfo.endCursor;
+  }
+  // Multi-page catalogs: mark products that disappeared only after every page was read.
+  if (complete && after !== null) await rpc("plugin_sync_products", { p_connection: conn, p_products: [], p_full_started_at: started });
+  return { upserted: n, complete };
+}
+
+/** Shopify's own attribution of the order (official customerJourneySummary): last visit first, then first visit.
+ *  Used only when the order has no LINKUP coupon and no link data in the webhook. Returns "" while not ready. */
+export async function shopifyJourneyRef(fetchFn: Fetch, cfg: Config, shop: string, token: string, orderId: string): Promise<string> {
+  const j = await gqlJson(fetchFn, cfg, shop, token, `query($id: ID!) { order(id: $id) { customerJourneySummary { ready
+    lastVisit { landingPage occurredAt } firstVisit { landingPage occurredAt } } } }`, { id: `gid://shopify/Order/${orderId}` });
+  const s = j?.data?.order?.customerJourneySummary; if (!s?.ready) return "";
+  for (const v of [s.lastVisit, s.firstVisit]) {
+    const r = refFromUrl(v?.landingPage); if (!r) continue;
+    const at = r.at ?? (v?.occurredAt ? Math.floor(Date.parse(v.occurredAt) / 1000) : null);
+    const ref = refString(r.code, at); if (ref) return ref;
+  }
+  return "";
+}
+
+export async function shopifyWebhook(rpc: Rpc, cfg: Config, headers: { get(k: string): string | null }, raw: string, fetchRaw?: Fetch): Promise<Reply> {
   if (!(await verifyShopifyWebhook(raw, headers.get("x-shopify-hmac-sha256"), cfg.shopifySecret ?? ""))) return { status: 401, body: { error: "unauthorized" } };
   const topic = headers.get("x-shopify-topic") ?? ""; const shop = (headers.get("x-shopify-shop-domain") ?? "").toLowerCase();
   const id = headers.get("x-shopify-webhook-id") ?? headers.get("x-shopify-event-id") ?? "";
@@ -189,14 +305,21 @@ export async function shopifyWebhook(rpc: Rpc, cfg: Config, headers: { get(k: st
   if (topic === "customers/data_request" || topic === "customers/redact") return { status: 200, body: { ok: true, stored_customer_data: "none" } };
   if (topic === "app/uninstalled" || topic === "shop/redact") {
     const r = await rpc("app_uninstalled", { p_platform: "shopify", p_shop: shop || String(body?.shop_domain ?? "") });
+    if (r.error) return { status: 500, body: { error: "temporary_error" } };
     return { status: 200, body: { ok: true, ...(r.data ?? {}) } };
   }
   if (!topic.startsWith("orders/")) return { status: 200, body: { ok: true, ignored: topic } };
-  const c = (await rpc("app_connection_by_shop", { p_platform: "shopify", p_shop: shop })).data as { connection_id: string } | null;
+  const cr = await rpc("app_connection_by_shop", { p_platform: "shopify", p_shop: shop });
+  if (cr.error) return { status: 500, body: { error: "temporary_error" } };
+  const c = cr.data as { connection_id: string } | null;
   if (!c) return { status: 200, body: { ok: true, ignored: "unknown_shop" } };
   const emailHash = typeof body?.email === "string" && body.email.includes("@") ? await sha256Hex(body.email.trim().toLowerCase()) : "";
   const order = shopifyOrder(body, emailHash);
   if (!order) return { status: 200, body: { ok: true, ignored: "not_an_order" } };
+  if (!order.ref && !order.coupons.length && fetchRaw && order.status !== "cancelled") {
+    const cred = (await rpc("app_credentials", { p_connection: c.connection_id })).data as { shop: string; token: string } | null;
+    if (cred?.token && cred.token !== "revoked") order.ref = await shopifyJourneyRef(retrying(fetchRaw, cfg.sleep), cfg, cred.shop, cred.token, order.id).catch(() => "");
+  }
   const at = body.updated_at ?? body.created_at ?? new Date().toISOString();
   const r = await rpc("ingest_order_event", { p_connection: c.connection_id, p_event: {
     event_id: `shopify:${id || `${order.id}:${at}`}`, type: `order.${topic.replace("orders/", "")}`, occurred_at: at, order } });
@@ -208,6 +331,8 @@ export async function shopifyWebhook(rpc: Rpc, cfg: Config, headers: { get(k: st
 }
 
 /* ---------- Wix ---------- */
+// Wix access tokens (client_credentials + instance id) are short-lived and minted on demand: nothing to refresh or store
+// long-term. The stored token is only the one from the install (kept so the connection has credentials on record).
 const wixToken = async (fetchFn: Fetch, cfg: Config, instanceId: string) => {
   const r = await fetchFn("https://www.wixapis.com/oauth2/token", { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ grant_type: "client_credentials", client_id: cfg.wixAppId, client_secret: cfg.wixSecret, instance_id: instanceId }) });
@@ -222,7 +347,8 @@ export function wixInstallUrl(cfg: Config, state: string): string | null {
   return `https://www.wix.com/installer/install?${new URLSearchParams({ appId: cfg.wixAppId, redirectUrl: `${cfg.functionsBase}/wix/callback`, state })}`;
 }
 
-export async function wixCallback(rpc: Rpc, fetchFn: Fetch, cfg: Config, params: URLSearchParams): Promise<Reply> {
+export async function wixCallback(rpc: Rpc, fetchRaw: Fetch, cfg: Config, params: URLSearchParams): Promise<Reply> {
+  const fetchFn = retrying(fetchRaw, cfg.sleep);
   const instanceId = (params.get("instanceId") ?? params.get("instance_id") ?? "").toLowerCase(); const state = params.get("state") ?? "";
   if (!/^[0-9a-f-]{36}$/.test(instanceId) || !state) return { status: 302, redirect: back(cfg, { error: "app_install_failed" }) };
   const token = await wixToken(fetchFn, cfg, instanceId);
@@ -233,22 +359,107 @@ export async function wixCallback(rpc: Rpc, fetchFn: Fetch, cfg: Config, params:
   if (done.error) return { status: 302, redirect: back(cfg, { error: done.error.message.match(/[a-z_]{6,}/)?.[0] ?? "app_install_failed" }) };
   const { connection_id: conn, org_id: org } = done.data as { connection_id: string; org_id: string };
   if (!site.ok) return { status: 302, redirect: back(cfg, { org, error: "app_not_verified" }) };   // the real API call failed
-  const sync = await rpc("plugin_sync", { p_connection: conn, p_plugin_version: "wix-app" });
-  if (!sync.error) await wixSyncCoupons(fetchFn, token, (sync.data?.coupons ?? []) as Coupon[]);
-  return { status: 302, redirect: back(cfg, sync.error ? { org, error: "app_not_verified" } : { org, ok: "app_connected" }) };
+  // Personal links on Wix: LINKUP's embedded script (consent-aware, loaded by Wix) is added to the site.
+  await wixApi(fetchFn, token, "/apps/v1/scripts", { properties: { parameters: { endpoint: `${cfg.functionsBase}/wix/ref`, instance: instanceId } } }).catch(() => null);
+  const r = await wixVerifyAndSync(rpc, fetchFn, cfg, conn, instanceId, true);
+  return { status: 302, redirect: back(cfg, r.ok ? { org, ok: "app_connected" } : { org, error: "app_not_verified" }) };
 }
 
-export async function wixSyncCoupons(fetchFn: Fetch, token: string, coupons: Coupon[]) {
-  const out = { created: 0, kept: 0 };
-  for (const cp of coupons.filter((c) => c.active)) {
+async function wixVerifyAndSync(rpc: Rpc, fetchFn: Fetch, cfg: Config, conn: string, instanceId: string, withProducts: boolean) {
+  const token = await wixToken(fetchFn, cfg, instanceId);
+  if (!token) return { ok: false as const, reason: "no_token" };
+  const site = await wixApi(fetchFn, token, "/apps/v1/instance");
+  if (!site.ok) return { ok: false as const, reason: "site_unreachable" };
+  const sync = await rpc("plugin_sync", { p_connection: conn, p_plugin_version: "wix-app" });
+  if (sync.error) return { ok: false as const, reason: "sync_failed" };
+  const coupons = await wixSyncCoupons(fetchFn, token, (sync.data?.coupons ?? []) as Coupon[],
+    (code, id, active) => rpc("app_coupon_mark", { p_connection: conn, p_code: code, p_external_id: id, p_active: active }).then(() => undefined));
+  const products = withProducts ? await wixSyncProducts(rpc, fetchFn, conn, token) : null;
+  return { ok: true as const, coupons, products };
+}
+
+export async function wixSyncCoupons(fetchFn: Fetch, token: string, coupons: Coupon[], mark?: Mark) {
+  const out = { created: 0, kept: 0, failed: 0, skipped: 0, deactivated: 0 };
+  for (const cp of coupons) {
+    if (!CODE_RE.test(cp.code)) { out.skipped++; continue; }
     const q = await wixApi(fetchFn, token, "/stores/v2/coupons/query", { query: { filter: JSON.stringify({ "specification.code": cp.code }) } });
-    const found = q.ok ? ((await q.json())?.coupons ?? []).length > 0 : true;   // unknown → don't risk a duplicate
-    if (found) { out.kept++; continue; }
-    await wixApi(fetchFn, token, "/stores/v2/coupons", { specification: { name: `LINKUP ${cp.code}`, code: cp.code,
-      startTime: new Date().toISOString(), percentOffRate: Math.max(0, Math.min(100, cp.discount_pct)), scope: { namespace: "stores" } } });
-    out.created++;
+    if (!q.ok) { out.failed++; continue; }   // unknown → don't risk a duplicate; next sync retries
+    const found = ((await q.json())?.coupons ?? [])[0];
+    if (found) {
+      const ours = String(found.specification?.name ?? "").startsWith("LINKUP ");
+      if (!cp.active && ours && found.id && found.specification?.active !== false) {
+        const u = await fetchFn(`https://www.wixapis.com/stores/v2/coupons/${found.id}`, { method: "PATCH",
+          headers: { "Content-Type": "application/json", Authorization: token }, body: JSON.stringify({ specification: { ...found.specification, active: false } }) });
+        if (!u.ok) { out.failed++; continue; }
+        out.deactivated++; await mark?.(cp.code, found.id, false); continue;
+      }
+      out.kept++; await mark?.(cp.code, found.id ?? null, cp.active && found.specification?.active !== false); continue;
+    }
+    if (!cp.active) { out.kept++; continue; }
+    if (!(cp.discount_pct > 0)) { out.skipped++; await mark?.(cp.code, null, false); continue; }
+    const c = await wixApi(fetchFn, token, "/stores/v2/coupons", { specification: { name: `LINKUP ${cp.code}`, code: cp.code,
+      startTime: new Date().toISOString(), percentOffRate: Math.min(100, cp.discount_pct), scope: { namespace: "stores" }, active: true } });
+    if (!c.ok) { out.failed++; continue; }
+    out.created++; await mark?.(cp.code, ((await c.json().catch(() => null)) as any)?.id ?? null, true);
   }
   return out;
+}
+
+export async function wixSyncProducts(rpc: Rpc, fetchFn: Fetch, conn: string, token: string) {
+  const started = new Date().toISOString(); let n = 0; let complete = false;
+  for (let page = 0; page < 10; page++) {
+    const r = await wixApi(fetchFn, token, "/stores/v1/products/query", { query: { paging: { limit: 100, offset: page * 100 } } });
+    if (!r.ok) break;
+    const list: any[] = ((await r.json())?.products ?? []);
+    const rows = list.filter((p) => p?.visible !== false).map((p) => {
+      const cur = String(p.priceData?.currency ?? p.price?.currency ?? "").toUpperCase();
+      const url = p.productPageUrl?.base && p.productPageUrl?.path ? `${String(p.productPageUrl.base).replace(/\/$/, "")}${p.productPageUrl.path}` : null;
+      return { id: String(p.id), name: p.name, url, image: p.media?.mainMedia?.image?.url ?? null,
+        price: String(toMinor(p.priceData?.price ?? p.price?.price, cur)), currency: cur,
+        in_stock: p.stock?.inStock !== false, stock_qty: p.stock?.trackInventory ? String(p.stock?.quantity ?? 0) : null, status: "publish" };
+    });
+    const last = list.length < 100;
+    if (rows.length || (last && page === 0)) {
+      const s = await rpc("plugin_sync_products", { p_connection: conn, p_products: rows, p_full_started_at: last && page === 0 ? started : null });
+      if (s.error) break; n += rows.length;
+    }
+    if (last) { complete = true; if (page > 0) await rpc("plugin_sync_products", { p_connection: conn, p_products: [], p_full_started_at: started }); break; }
+  }
+  return { upserted: n, complete };
+}
+
+/** Personal link on Wix. Wix orders carry no landing page, so LINKUP's embedded script keeps the creator code on the
+ *  site (only with the visitor's consent, enforced by Wix for the script's consent category) and, on Wix's own
+ *  "Purchase" event on the thank-you page, sends { instance, order id, ref }.
+ *  The browser is trusted ONLY for the ref: the order itself is read from Wix's API with the app's token and must be
+ *  fresh; it then goes through the same engine (coupon wins over link, one attribution per order, no commission
+ *  before payment, cancellations/refunds from Wix webhooks). */
+export async function wixRef(rpc: Rpc, fetchRaw: Fetch, cfg: Config, raw: string): Promise<Reply> {
+  let b: any; try { b = JSON.parse(raw); } catch { return { status: 400, body: { error: "invalid_json" } }; }
+  const instance = String(b?.instance ?? "").toLowerCase(); const orderId = String(b?.order ?? ""); const ref = String(b?.ref ?? "");
+  if (!/^[0-9a-f-]{36}$/.test(instance) || !/^[0-9a-f-]{36}$/i.test(orderId) || !REF_RE.test(ref)) return { status: 400, body: { error: "invalid_input" } };
+  const cr = await rpc("app_connection_by_shop", { p_platform: "wix", p_shop: instance });
+  if (cr.error) return { status: 500, body: { error: "temporary_error" } };
+  const c = cr.data as { connection_id: string; status: string } | null;
+  if (!c || c.status === "disconnected") return { status: 200, body: { ok: true, ignored: "unknown_instance" } };
+  const fetchFn = retrying(fetchRaw, cfg.sleep);
+  const token = await wixToken(fetchFn, cfg, instance);
+  if (!token) return { status: 500, body: { error: "temporary_error" } };
+  const r = await wixApi(fetchFn, token, `/ecom/v1/orders/${orderId}`);
+  if (r.status === 404) return { status: 200, body: { ok: true, ignored: "unknown_order" } };
+  if (!r.ok) return { status: 500, body: { error: "temporary_error" } };
+  const o = (await r.json())?.order;
+  const created = Date.parse(o?.createdDate ?? "");
+  if (!o || !Number.isFinite(created) || Date.now() - created > 2 * 3600_000) return { status: 200, body: { ok: true, ignored: "not_recent" } };
+  const n = wixOrder(o); if (!n) return { status: 200, body: { ok: true, ignored: "not_an_order" } };
+  n.ref = ref;
+  const ing = await rpc("ingest_order_event", { p_connection: c.connection_id, p_event: {
+    event_id: `wix-ref:${orderId}`, type: "order.link", occurred_at: o.updatedDate ?? o.createdDate, order: n } });
+  if (ing.error) {
+    if (/connection_disconnected|invalid_event/.test(ing.error.message)) return { status: 200, body: { ok: false } };
+    return { status: 500, body: { error: "temporary_error" } };
+  }
+  return { status: 200, body: { ok: true } };
 }
 
 export async function wixWebhook(rpc: Rpc, cfg: Config, raw: string): Promise<Reply> {
@@ -258,6 +469,7 @@ export async function wixWebhook(rpc: Rpc, cfg: Config, raw: string): Promise<Re
   const outer = parse(p.data) ?? {}; const eventType = String(outer.eventType ?? ""); const instanceId = String(outer.instanceId ?? "").toLowerCase();
   if (/app_removed|AppRemoved/i.test(eventType)) {
     const r = await rpc("app_uninstalled", { p_platform: "wix", p_shop: instanceId });
+    if (r.error) return { status: 500, body: { error: "temporary_error" } };
     return { status: 200, body: { ok: true, ...(r.data ?? {}) } };
   }
   if (!/order_(created|approved|canceled|updated|payment_status_updated)/i.test(eventType)) return { status: 200, body: { ok: true, ignored: eventType } };
@@ -268,7 +480,9 @@ export async function wixWebhook(rpc: Rpc, cfg: Config, raw: string): Promise<Re
   }
   const n = wixOrder(order);
   if (!n) return { status: 200, body: { ok: true, ignored: "not_an_order" } };
-  const c = (await rpc("app_connection_by_shop", { p_platform: "wix", p_shop: instanceId })).data as { connection_id: string } | null;
+  const cr = await rpc("app_connection_by_shop", { p_platform: "wix", p_shop: instanceId });
+  if (cr.error) return { status: 500, body: { error: "temporary_error" } };
+  const c = cr.data as { connection_id: string } | null;
   if (!c) return { status: 200, body: { ok: true, ignored: "unknown_instance" } };
   const at = order.updatedDate ?? order.createdDate ?? new Date().toISOString();
   const r = await rpc("ingest_order_event", { p_connection: c.connection_id, p_event: {
@@ -278,4 +492,28 @@ export async function wixWebhook(rpc: Rpc, cfg: Config, raw: string): Promise<Re
     return { status: 500, body: { error: "temporary_error" } };
   }
   return { status: 200, body: { ok: true, result: r.data } };
+}
+
+/* ---------- periodic sync (scheduled): coupons, products, connection health ---------- */
+/** For every app connection: real API call first (a revoked or broken shop is NOT marked connected), then plugin_sync,
+ *  coupons and products. One failing shop never stops the others. */
+export async function syncAll(rpc: Rpc, fetchRaw: Fetch, cfg: Config, headers: { get(k: string): string | null }): Promise<Reply> {
+  if (!cfg.cronSecret || !same(headers.get("x-linkup-cron") ?? "", cfg.cronSecret)) return { status: 401, body: { error: "unauthorized" } };
+  const fetchFn = retrying(fetchRaw, cfg.sleep); const out: Record<string, unknown>[] = [];
+  for (const platform of ["shopify", "wix"] as const) {
+    const ids = ([] as string[]).concat(((await rpc("app_connections", { p_platform: platform })).data ?? []) as string[] | string);
+    for (const conn of ids) {
+      try {
+        let r: any;
+        if (platform === "shopify") r = await shopifyVerifyAndSync(rpc, fetchFn, cfg, conn, true);
+        else {
+          const c = (await rpc("app_credentials", { p_connection: conn })).data as { shop: string } | null;
+          r = c ? await wixVerifyAndSync(rpc, fetchFn, cfg, conn, c.shop, true) : { ok: false, reason: "no_credentials" };
+        }
+        if (!r.ok) await rpc("app_sync_failed", { p_connection: conn, p_reason: r.reason });
+        out.push({ platform, connection: conn, ok: r.ok, reason: r.ok ? undefined : r.reason, coupons: r.coupons, products: r.products });
+      } catch { out.push({ platform, connection: conn, ok: false, reason: "exception" }); }
+    }
+  }
+  return { status: 200, body: { ok: true, connections: out.length, results: out } };
 }

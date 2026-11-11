@@ -1,0 +1,12 @@
+{% comment %}
+  LINKUP personal links (app embed). No settings, no visible output. Loads one small deferred script.
+{% endcomment %}
+<script src="{{ 'linkup-ref.js' | asset_url }}" defer data-root="{{ routes.root_url }}"></script>
+
+{% schema %}
+{
+  "name": "LINKUP personal links",
+  "target": "body",
+  "settings": []
+}
+{% endschema %}

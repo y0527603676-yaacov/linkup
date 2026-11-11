@@ -26,3 +26,7 @@ Developer guide: `/developers`.
   message for whoever built the site.
 - Funnel (admin → overview, 30 days): started, connected on their own / with the guide / with assistance, not connected,
   unsupported platforms, top failure reasons. Goal: 80% on their own (measured, not promised).
+
+## Shopify / Wix apps and personal links (migrations 20261111102000, 20261111102100 — pending approval)
+See `docs/SHOPIFY_WIX_SETUP.md`: official attribution paths per platform, limits, what is still unverified against real
+platforms, and the owner's setup steps. The `/r/CODE` link now also carries `lkt` (visit time); WooCommerce ignores it.

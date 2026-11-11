@@ -1,20 +1,15 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSupabase } from "@/lib/supabase/server";
+import { partnerDestination, type ResolvedLink } from "@/lib/partner-link";
 
-/** Partner link: /r/CODE → store site with ?lku=CODE (the plugin stores a 30-day first-party cookie) and standard
- *  UTM tags (WooCommerce's built-in Order Attribution records them for same-visit purchases, no plugin needed). */
+/** Creator's personal link: /r/CODE → the store (see lib/partner-link for how each platform keeps the attribution). */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ code: string }> }) {
   const { code } = await params;
   const home = new URL("/", req.url);
   if (!/^[A-Za-z0-9]{4,16}$/.test(code)) return NextResponse.redirect(home);
   const sb = await getSupabase();
   const { data } = await sb.rpc("resolve_partner_link", { p_code: code });
-  const r = data as { code: string; url: string | null } | null;
-  if (!r?.url) return NextResponse.redirect(home);
-  const dest = new URL(r.url);
-  dest.searchParams.set("lku", r.code);
-  dest.searchParams.set("utm_source", "linkup");
-  dest.searchParams.set("utm_medium", "partner");
-  dest.searchParams.set("utm_campaign", r.code);
+  const dest = data ? partnerDestination(data as ResolvedLink) : null;
+  if (!dest) return NextResponse.redirect(home);
   return NextResponse.redirect(dest, { status: 302 });
 }

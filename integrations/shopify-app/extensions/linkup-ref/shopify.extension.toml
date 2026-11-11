@@ -1,0 +1,5 @@
+# Theme app extension: one app embed ("LINKUP personal links"). The store owner turns it on once in the theme editor
+# (LINKUP shows a one-click link). It keeps the creator code from the personal link and writes it to the cart as the
+# attribute "linkup_ref", which Shopify copies to the order (note_attributes).
+name = "linkup-ref"
+type = "theme"

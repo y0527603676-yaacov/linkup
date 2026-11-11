@@ -1,0 +1,26 @@
+# LINKUP Shopify app — configuration template (fill client_id after creating the app in the Shopify Partner dashboard).
+# Deploy with the Shopify CLI from this folder:  shopify app deploy
+client_id = "REPLACE_WITH_SHOPIFY_API_KEY"
+name = "LINKUP"
+application_url = "https://linkup-tawny.vercel.app/app/connect"
+embedded = false
+
+[access_scopes]
+scopes = "read_orders,read_products,write_discounts"
+
+[auth]
+redirect_urls = ["https://ycuvcpslvkgndytubycn.supabase.co/functions/v1/apps/shopify/callback"]
+
+[webhooks]
+api_version = "2026-07"
+
+  # Mandatory privacy webhooks (LINKUP keeps no customer names or contacts; only an e-mail hash).
+  [[webhooks.subscriptions]]
+  compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
+  uri = "https://ycuvcpslvkgndytubycn.supabase.co/functions/v1/apps/shopify/webhook"
+
+  # Order and uninstall webhooks are registered per shop by LINKUP after install (webhookSubscriptionCreate),
+  # so they are not repeated here (no double deliveries).
+
+[pos]
+embedded = false

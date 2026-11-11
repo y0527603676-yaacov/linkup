@@ -17,7 +17,7 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
   const { sb, org, t, locale } = ctx;
   const l = t.connect;
   const [{ data: conns }, { data: o }, { data: pend }, { data: apiOpen }, { data: wpOpen }, { data: pubDocs }] = await Promise.all([
-    sb.from("store_connections").select("status, site_url, last_sync_at, plugin_version, method, last_error").eq("org_id", org.id).order("created_at", { ascending: false }).limit(1),
+    sb.from("store_connections").select("status, site_url, last_sync_at, plugin_version, method, last_error, platform").eq("org_id", org.id).order("created_at", { ascending: false }).limit(1),
     sb.from("organizations").select("website_url").eq("id", org.id).single(),
     sb.rpc("legal_pending", { p_context: "store" }),
     sb.rpc("woo_api_available", { p_org: org.id }),
@@ -25,11 +25,15 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
     sb.from("legal_documents").select("doc_key").eq("status", "published").in("doc_key", ["store-terms", "privacy", "cookies"]),
   ]);
   const published = new Set(((pubDocs ?? []) as { doc_key: string }[]).map((d) => d.doc_key));
-  const c = conns?.[0] as { status: string; site_url: string; last_sync_at: string | null; plugin_version: string | null; method: string; last_error: string | null } | undefined;
+  const c = conns?.[0] as { status: string; site_url: string; last_sync_at: string | null; plugin_version: string | null; method: string; last_error: string | null; platform?: string } | undefined;
   const legal = (pend ?? []) as PendingDoc[];
   const site = c?.site_url ?? o?.website_url ?? "";
   const api = apiOpen === true;
   const connected = c?.status === "connected";
+  // Shopify app: one optional click turns on LINKUP's theme app embed (personal links survive a new cart / later visit).
+  const shopHost = c?.method === "app" && c.platform === "shopify" ? (c.site_url.match(/^https:\/\/([a-z0-9-]+\.myshopify\.com)$/)?.[1] ?? null) : null;
+  const embedLink = APP_ON.shopify && connected && shopHost && process.env.SHOPIFY_API_KEY
+    ? `https://${shopHost}/admin/themes/current/editor?context=apps&template=index&activateAppId=${encodeURIComponent(process.env.SHOPIFY_API_KEY)}/linkup-ref` : null;
   const wpAvail = wpOpen === true;
   const w = l.wp;
   const f = l.flow;
@@ -96,6 +100,12 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
         {sp.ok === "sync" && <Alert kind="ok" text={l.syncStarted} />}
         {sp.ok === "disconnected" && <Alert kind="ok" text={l.disconnect.ok} />}
         {sp.ok === "app_connected" && <Alert kind="ok" text={u.app.connected} />}
+        {embedLink && (
+          <div className="card card-flat stack" style={{ marginBottom: 16, gap: 8 }} data-testid="shopify-embed">
+            <p style={{ margin: 0 }}>{u.app.embed}</p>
+            <a className="btn btn-primary" href={embedLink} target="_blank" rel="noopener noreferrer">{u.app.embedCta}</a>
+          </div>
+        )}
         {wpResult === "connected" && <Alert kind="ok" text={w.done} />}
         {wpResult && wpResult !== "connected" && <Alert text={wpResult === "not_in_directory" ? `${w.errors.not_in_directory} ${w.uploadThen}` : (w.errors[wpResult] ?? w.errors.other)} />}
         {sp.wpr === "0" && <Alert text={w.notRevoked} />}

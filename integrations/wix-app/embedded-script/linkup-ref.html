@@ -1,0 +1,43 @@
+<!-- LINKUP personal links for Wix (self-managed embedded script; parameters filled by Wix: endpoint, instance).
+     Register in the Wix app dashboard as an embedded script, placement BODY_END, type ADVERTISING (marketing):
+     Wix loads it only after the visitor's consent where a consent banner applies.
+     1. ?lku=CODE&lkt=<visit time> from a creator's personal link → kept in this browser (up to 90 days; the agreement's
+        own window is enforced by LINKUP's server). Last click wins.
+     2. On Wix's standard "Purchase" event (thank-you page) it sends { instance, order id, ref } to LINKUP.
+        LINKUP re-reads that order from Wix's API with the app's token; the browser never supplies amounts or status. -->
+<script>
+(function () {
+  "use strict";
+  var ENDPOINT = "{{endpoint}}", INSTANCE = "{{instance}}", KEY = "linkup_ref", MAX_AGE = 90 * 86400;
+  var RE = /^[A-Za-z0-9]{4,16}\|\d{9,11}$/;
+  function now() { return Math.floor(Date.now() / 1000); }
+  function read() {
+    var v = null; try { v = localStorage.getItem(KEY); } catch (e) {}
+    if (!v || !RE.test(v) || now() - Number(v.split("|")[1]) > MAX_AGE) return null;
+    return v;
+  }
+  var p = new URLSearchParams(location.search), code = p.get("lku") || "", t = p.get("lkt") || "";
+  if (/^[A-Za-z0-9]{4,16}$/.test(code)) {
+    var ts = /^\d{9,11}$/.test(t) ? Number(t) : now(); if (ts > now() + 300) ts = now();
+    try { localStorage.setItem(KEY, code + "|" + ts); } catch (e) {}
+  }
+  var sent = {};
+  function onEvent(name, data) {
+    if (name !== "Purchase" || !data) return;
+    var ref = read(), order = String(data.orderId || "");
+    if (!ref || !/^[0-9a-f-]{36}$/i.test(order) || sent[order]) return;
+    sent[order] = 1;
+    var body = JSON.stringify({ instance: INSTANCE, order: order, ref: ref });
+    // text/plain keeps it a simple request (no CORS preflight); the server parses the JSON text.
+    var blob = new Blob([body], { type: "text/plain" });
+    if (!(navigator.sendBeacon && navigator.sendBeacon(ENDPOINT, blob))) {
+      fetch(ENDPOINT, { method: "POST", body: body, headers: { "Content-Type": "text/plain" }, keepalive: true }).catch(function () {});
+    }
+  }
+  function register() {
+    try { window.wixDevelopersAnalytics.register("linkup", onEvent); return true; } catch (e) { return false; }
+  }
+  if (!(window.wixDevelopersAnalytics && register())) window.addEventListener("wixDevelopersAnalyticsReady", register);
+  window.__linkupWixOnEvent = onEvent; // used by the CLI variant (site-analytics.js) and by tests
+})();
+</script>

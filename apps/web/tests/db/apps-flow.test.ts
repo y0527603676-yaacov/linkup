@@ -37,7 +37,7 @@ function fakeShopify(opts: { scope?: string; shopOk?: boolean } = {}) {
       if (qy.includes("shop {")) return opts.shopOk === false ? res(401, {}) : res(200, { data: { shop: { myshopifyDomain: "demo.myshopify.com", primaryDomain: { url: "https://demo.co.il" }, currencyCode: "ILS" } } });
       if (qy.includes("webhookSubscriptionCreate")) return res(200, { data: { webhookSubscriptionCreate: { userErrors: [] } } });
       if (qy.includes("codeDiscountNodeByCode")) { const d = discounts.get(body.variables.code); return res(200, { data: { codeDiscountNodeByCode: d ? { id: d.id, codeDiscount: { title: d.title } } : null } }); }
-      if (qy.includes("discountCodeBasicCreate")) { discounts.set(body.variables.d.code, { id: `gid://${body.variables.d.code}`, title: body.variables.d.title }); return res(200, { data: {} }); }
+      if (qy.includes("discountCodeBasicCreate")) { discounts.set(body.variables.d.code, { id: `gid://${body.variables.d.code}`, title: body.variables.d.title }); return res(200, { data: { discountCodeBasicCreate: { codeDiscountNode: { id: `gid://${body.variables.d.code}` }, userErrors: [] } } }); }
     }
     return res(404, {});
   };
@@ -97,6 +97,7 @@ describe("Shopify: install with the owner's approval", () => {
     expect(c).toEqual({ platform: "shopify", method: "app", status: "connected", site_url: "https://demo.myshopify.com" });
     expect(s.calls.filter((x) => x.body?.query?.includes("webhookSubscriptionCreate")).map((x) => x.body.variables.topic)).toEqual(core.SHOPIFY_TOPICS);
     expect(s.discounts.has(code)).toBe(true);
+    expect((await q(`select active from app_coupons where code = upper($1)`, [code]))[0]?.active).toBe(true);   // confirmed in the shop
     expect((await q(`select s.secret from vault.secrets s join store_app_credentials c on c.token_secret = s.id where c.shop = 'demo.myshopify.com'`))[0].secret).toBe("shpat_x");
     expect(await call(u.store!, "tracking_mode", { p_store: org.store })).toBe("automatic");
     // the same state cannot be used twice
