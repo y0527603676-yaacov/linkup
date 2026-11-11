@@ -35,6 +35,14 @@ export default async function Stores() {
           <h2>{s.calcTitle}</h2>
           <p className="sub">{s.calcLead}</p>
           <PriceCalc l={s.calc} locale={locale} />
+          <div className="card price-card">
+            <h3>{s.priceTitle}</h3>
+            <b className="price-big">{s.priceBig}</b>
+            <p>{s.priceText}</p>
+            <p className="small muted">{s.priceExplain}</p>
+            <p className="price-note">{s.priceNote}</p>
+            <div><Link className="btn btn-primary" href={cta}>{s.priceCta}</Link></div>
+          </div>
         </div>
       </section>
       <section className="band alt">

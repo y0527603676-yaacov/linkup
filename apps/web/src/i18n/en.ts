@@ -65,10 +65,16 @@ export const en: Dict = {
     finalTitle: "Your products. Their audience. An opportunity for everyone.",
     finalText: "Connect your store, create a first offer and invite creators to start working with you.",
     finalCta: "Get started with my store",
+    priceTitle: "You pay only when you sell.", priceBig: "Only 2% + VAT",
+    priceText: "Join LINKUP and enjoy a platform fee of only 2% for the first six months from connecting your store. After that, the fee is 3% + VAT.",
+    priceExplain: "The fee is calculated on the amount of qualifying sales, excluding VAT and shipping. The creator commission is set separately by the store.",
+    priceNote: "No joining fee or monthly subscription.", priceCta: "Connect the store",
     launchTitle: "LINKUP LAUNCH",
     launchText: "Need a push? Open a short campaign with a higher commission. All partners get notified, with ready-to-share content.",
     faqTitle: "FAQ",
     faq: [
+      { q: "How much does it cost to use LINKUP?", a: "Joining is free and there is no monthly subscription. You pay a platform fee only on qualifying sales: 2% + VAT for the first six months from connecting the store, and 3% + VAT after that. The creator commission is separate and set by the store." },
+      { q: "Do I need a developer to connect the store?", a: "No. Connecting is simple and requires no technical knowledge. At this stage, you upload the connection file to WordPress once and approve the connection in LINKUP. Later, after the plugin is published in the official WordPress directory, connecting will take a single approval." },
       { q: "Who pays the creators?", a: "You do, directly. LINKUP shows exactly how much and to whom, and lets you mark payments." },
       { q: "What if a customer returns a product?", a: "The commission updates automatically. Commissions are approved only after the return window." },
       { q: "Can I leave?", a: "Yes, any time. Disconnect the plugin and pay only for what was already sold." },
@@ -103,7 +109,9 @@ export const en: Dict = {
   },
   fp: {
     title: "FOUNDING PARTNERS",
-    lead: "Invite stores and creators to LINKUP and receive 40% of LINKUP's revenue from them.",
+    headline: "Invite friends. Earn from their success.",
+    lead: "Share LINKUP with stores and creators and you can receive up to 40% of the platform fee actually collected, excluding VAT, on qualifying sales for 90 days from the first qualifying sale, subject to the program terms.",
+    split: "When two different referrers are entitled to a reward on the same sale, the reward is split between them – 20% each.",
     rules: [
       "Reward: 40% of the LINKUP fee actually collected from the people you invited.",
       "Period: 90 days from their first sale. They have 12 months from signing up to make a first sale.",
