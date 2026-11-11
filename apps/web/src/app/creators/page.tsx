@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { PublicPage } from "@/components/Site";
+import { PublicPage, Faq } from "@/components/Site";
+import { FpBand } from "@/components/FpBand";
 import { getT } from "@/i18n";
 import { getSupabase } from "@/lib/supabase/server";
 import { money, pct } from "@/lib/format";
@@ -62,6 +63,13 @@ export default async function Creators() {
           </div>
         </section>
       )}
+      <FpBand t={t} />
+      <section className="band alt">
+        <div className="container" style={{ maxWidth: 760 }}>
+          <h2>{c.faqTitle}</h2>
+          <Faq items={c.faq} />
+        </div>
+      </section>
       <section className="final container">
         <h2>{c.finalTitle}</h2>
         <Link className="btn btn-primary" href={cta}>{c.finalCta}</Link>

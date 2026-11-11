@@ -43,6 +43,9 @@ export const en: Dict = {
     joinText: "Join LINKUP and start creating new opportunities for sales and income.",
     joinStore: "Join as a store",
     joinCreator: "Join as a creator",
+    trustTitle: "Built on trust",
+    trust: ["Commission excludes VAT and shipping", "Refunds and cancellations update automatically", "Every financial record is kept, never deleted", "LINKUP never touches order money"],
+    fpCta: "Program details",
   },
   stores: {
     title: "Let creators bring you customers.",
@@ -62,6 +65,14 @@ export const en: Dict = {
     finalTitle: "Your products. Their audience. An opportunity for everyone.",
     finalText: "Connect your store, create a first offer and invite creators to start working with you.",
     finalCta: "Get started with my store",
+    launchTitle: "LINKUP LAUNCH",
+    launchText: "Need a push? Open a short campaign with a higher commission. All partners get notified, with ready-to-share content.",
+    faqTitle: "FAQ",
+    faq: [
+      { q: "Who pays the creators?", a: "You do, directly. LINKUP shows exactly how much and to whom, and lets you mark payments." },
+      { q: "What if a customer returns a product?", a: "The commission updates automatically. Commissions are approved only after the return window." },
+      { q: "Can I leave?", a: "Yes, any time. Disconnect the plugin and pay only for what was already sold." },
+    ],
   },
   creators: {
     title: "You recommend. You can earn.",
@@ -79,6 +90,13 @@ export const en: Dict = {
     steps: ["Join for free", "Choose a store and share", "Earn from qualifying sales"],
     finalTitle: "Your next recommendation could become income.",
     finalCta: "Join now",
+    faqTitle: "FAQ",
+    faq: [
+      { q: "How many followers do I need?", a: "There's no minimum. Sales are what count." },
+      { q: "Who pays me?", a: "The store, directly. In LINKUP you see what you're owed, what was approved and what was paid." },
+      { q: "When is a commission approved?", a: "After the order is completed and the return window has passed (usually 14 days)." },
+      { q: "Does it cost anything?", a: "No. LINKUP takes nothing from your commission." },
+    ],
     nowTitle: "Opportunities now",
     commission: "Commission",
     discount: "Follower discount",

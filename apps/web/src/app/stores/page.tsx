@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { PublicPage } from "@/components/Site";
+import { PublicPage, Faq } from "@/components/Site";
+import { FpBand } from "@/components/FpBand";
 import { PriceCalc } from "@/components/PriceCalc";
 import { getT } from "@/i18n";
 
@@ -34,6 +35,21 @@ export default async function Stores() {
           <h2>{s.calcTitle}</h2>
           <p className="sub">{s.calcLead}</p>
           <PriceCalc l={s.calc} locale={locale} />
+        </div>
+      </section>
+      <section className="band alt">
+        <div className="container">
+          <div className="card launch-card">
+            <p className="eyebrow">{s.launchTitle}</p>
+            <p style={{ margin: "8px 0 0", fontSize: "1.08rem" }}>{s.launchText}</p>
+          </div>
+        </div>
+      </section>
+      <FpBand t={t} />
+      <section className="band alt">
+        <div className="container" style={{ maxWidth: 760 }}>
+          <h2>{s.faqTitle}</h2>
+          <Faq items={s.faq} />
         </div>
       </section>
       <section className="final container">

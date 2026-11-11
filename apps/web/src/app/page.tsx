@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { PublicPage } from "@/components/Site";
+import { FpBand } from "@/components/FpBand";
 import { getT } from "@/i18n";
 
 export default async function Home() {
@@ -36,6 +37,13 @@ export default async function Home() {
           </ol>
         </div>
       </section>
+      <section className="band alt">
+        <div className="container">
+          <h2>{h.trustTitle}</h2>
+          <ul className="trust-grid">{h.trust.map((x) => <li key={x}>{x}</li>)}</ul>
+        </div>
+      </section>
+      <FpBand t={t} />
       <section className="final container">
         <h2>{h.joinTitle}</h2>
         <p className="muted final-text">{h.joinText}</p>

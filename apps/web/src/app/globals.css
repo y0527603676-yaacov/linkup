@@ -321,3 +321,19 @@ button[data-pending], .btn[data-pending] { opacity: .7; cursor: progress; }
 .final .center-actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
 .steps li h3:only-child { margin: 0; }
 @media (min-width: 900px) { .features.four { grid-template-columns: repeat(4, 1fr); } .features.three { grid-template-columns: repeat(3, 1fr); } }
+
+/* FOUNDING PARTNERS band on marketing pages */
+.fp-band { display: grid; gap: 24px; align-items: center; }
+.fp-band h2 { letter-spacing: 0; margin: 6px 0 8px; }
+.fp-eyebrow { color: #c9bdff; letter-spacing: .12em; margin: 0; }
+.fp-offer { background: rgb(255 255 255 / .08); border: 1px solid rgb(255 255 255 / .14); border-radius: 20px; padding: 22px; }
+.fp-big { display: block; font-size: clamp(1.6rem, 4vw, 2.2rem); line-height: 1.15; color: #fff; margin-bottom: 8px; }
+.fp-note { color: rgb(255 255 255 / .7) !important; }
+.fp-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+.fp .fp-ghost { color: #fff; border-color: rgb(255 255 255 / .4); background: transparent; }
+@media (min-width: 900px) { .fp-band { grid-template-columns: 1.1fr 1fr; padding: 44px; } }
+/* Trust list on the home page */
+.trust-grid { display: grid; gap: 12px; margin-top: 18px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.trust-grid li { list-style: none; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px; font-weight: 600; display: flex; gap: 10px; align-items: flex-start; }
+.trust-grid li::before { content: "✓"; color: var(--money); font-weight: 800; }
+.trust-grid { padding: 0; }
