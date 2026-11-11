@@ -1,5 +1,8 @@
 # LINKUP on Shopify and Wix: status, link attribution, setup
 
+Database: migrations 20261111102000 and 20261111102100 applied to production on 11.11.2026 (approved); nothing
+activated — no app credentials, no edge function deployed, no scheduled sync, store-facing buttons off.
+
 Status (11.11.2026): built and tested against simulated Shopify/Wix APIs and a local database. **Not yet tested against a
 real Shopify development store or a Wix test site.** Store-facing buttons stay off (`LINKUP_SHOPIFY_APP`,
 `LINKUP_WIX_APP`). Nothing below is live in production.
@@ -60,7 +63,7 @@ body, Wix embedded-script plan/domain requirements.
 - `integrations/wix-app/embedded-script/` — self-managed embedded script (`{{endpoint}}`, `{{instance}}` parameters)
   and a Wix CLI variant.
 - `apps/web/src/lib/partner-link.ts` + `/r/[code]` — where a personal link sends the visitor.
-- Migrations (pending approval): `20261111102000_app_connections.sql`, `20261111102100_link_attribution.sql`;
+- Migrations (applied 11.11.2026): `20261111102000_app_connections.sql`, `20261111102100_link_attribution.sql`;
   rollbacks in `supabase/rollback/20261111102000.down.sql`, `20261111102100.down.sql`.
 - Tests: `tests/db/apps-flow.test.ts`, `tests/db/link-attribution.test.ts`, `tests/storefront/ref-scripts.cjs`
   (real Chromium, desktop/iPhone/iPad/Pixel).
