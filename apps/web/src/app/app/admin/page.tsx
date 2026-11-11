@@ -22,7 +22,9 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
   const { data: ts } = await sb.rpc("admin_test_signups");
   const [{ data: cf }, { data: chq }] = tab === "overview" ? await Promise.all([sb.rpc("connect_funnel_stats", { p_days: 30 }), sb.rpc("admin_connect_help")]) : [{ data: null }, { data: null }];
   const ac = t.uc.adminConnect; const C = (cf ?? null) as Record<string, any> | null; const helpReqs = (chq ?? []) as any[];
-  const share = (n: number, d: number) => (d ? `${Math.round((n / d) * 100)}%` : "—");
+  // Percentages only with a meaningful sample (no "100%" from one store).
+  const MIN_SAMPLE = 10;
+  const share = (n: number, d: number) => (d >= MIN_SAMPLE ? `${Math.round((n / d) * 100)}%` : "—");
   const testSignups = (ts ?? []) as { email: string; note: string | null; registered: boolean }[];
   const F = (fd ?? {}) as Record<string, any>;
   const exceptions = (exq ?? []) as any[];
@@ -58,18 +60,20 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
           <div className="stats">
             <Stat label={ac.started} value={String(C.stores_started)} />
             <Stat label={ac.connected} value={String(C.connected)} />
-            <Stat label={`${ac.self} (${ac.ofConnected})`} value={share(C.connected_self, C.connected)} />
             <Stat label={ac.notConnected} value={String(C.not_connected)} />
+            <Stat label={ac.success} value={share(C.connected, C.stores_started)} />
+            <Stat label={`${ac.self} (${ac.ofConnected})`} value={share(C.connected_self, C.connected)} />
           </div>
-          <p className="small muted">{ac.target} · {ac.guided}: {C.connected_guided} · {ac.assisted}: {C.connected_assisted}</p>
-          {Object.keys(C.unsupported ?? {}).length > 0 && <p className="small">{ac.unsupported}: {Object.entries(C.unsupported).map(([k, v]) => `${k} ${v}`).join(" · ")}</p>}
-          {(C.failure_reasons ?? []).length > 0 && <p className="small">{ac.reasons}: {(C.failure_reasons as any[]).map((r) => `${r.reason} (${r.stores})`).join(" · ")}</p>}
+          <p className="small muted">{ac.self}: {C.connected_self} · {ac.guided}: {C.connected_guided} · {ac.assisted}: {C.connected_assisted} · {ac.target}
+            {(C.connected < MIN_SAMPLE || C.stores_started < MIN_SAMPLE) && <> · {ac.smallSample}</>}</p>
+          {Object.keys(C.unsupported ?? {}).length > 0 && <p className="small">{ac.unsupported}: {Object.entries(C.unsupported).map(([k, v]) => `${ac.platforms[k] ?? k} (${v})`).join(" · ")}</p>}
+          {(C.failure_reasons ?? []).length > 0 && <p className="small">{ac.reasons}: {(C.failure_reasons as any[]).map((r) => `${ac.reasonsMap[r.reason] ?? r.reason} (${r.stores})`).join(" · ")}</p>}
           <h3 style={{ marginBottom: 6 }}>{ac.help}</h3>
           {!helpReqs.length && <p className="small muted">{ac.noHelp}</p>}
           {helpReqs.map((h) => (
             <div key={h.id} className="card card-flat row between" style={{ gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
               <span className="small"><b>{h.org}</b> · {t.uc.help.channels[h.channel]} · <span className="ltr">{h.phone}</span>{h.preferred_time && <> · {h.preferred_time}</>}
-                {h.site_host && <> · <span className="ltr">{h.site_host}</span></>}{h.platform && <> · {h.platform}</>}{h.note && <><br />{h.note}</>}</span>
+                {h.site_host && <> · <span className="ltr">{h.site_host}</span></>}{h.platform && <> · {ac.platforms[h.platform] ?? h.platform}</>}{h.note && <><br />{h.note}</>}</span>
               <form action={adminCloseConnectHelp}><input type="hidden" name="org" value={org.id} /><input type="hidden" name="id" value={h.id} />
                 <button className="btn btn-ghost btn-sm">{ac.done}</button></form>
             </div>

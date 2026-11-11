@@ -203,7 +203,7 @@ export const he = {
       },
       wpNoWoo: { t: "האתר בנוי על WordPress, אבל לא מצאנו בו WooCommerce", d: "LINKUP מתחברת לחנויות WooCommerce. אם החנות נמצאת באתר אחר, בדקו את הכתובת שלה. אם WooCommerce מותקן אבל כבוי, הפעילו אותו ובדקו שוב." },
       unsupported: { t: "החנות בנויה על {p}", d: "עדיין אין חיבור ל-{p}. כרגע אפשר לחבר חנויות WooCommerce בלבד. נשמח לשמוע שאתם מחכים לזה." },
-      unknown: { t: "לא הצלחנו לזהות על איזו מערכת החנות בנויה", d: "ייתכן שהאתר חוסם בדיקות אוטומטיות, או שהוא בנוי על מערכת שעדיין לא נתמכת. אם החנות שלכם ב-WooCommerce, נבדוק שיש בכתובת הזו ממשק ניהול של WordPress ונמשיך משם.", wooYes: "החנות שלי ב-WooCommerce" },
+      unknown: { t: "לא הצלחנו לזהות את החנות", d: "אם החנות בנויה על WooCommerce, נמשיך מכאן.", wooYes: "החנות שלי ב-WooCommerce", other: "האתר נבנה במיוחד עבורנו" },
       errors: {
         invalid_url: "הכתובת לא נראית תקינה. נסו למשל: myshop.co.il",
         not_public: "אי אפשר לבדוק את הכתובת הזו. ודאו שזו הכתובת הציבורית של החנות.",
@@ -357,7 +357,7 @@ export const he = {
       trust: "חשוב לדעת: כל דיווח חתום במפתח של החנות, ולכן אי אפשר לזייף אותו או לשלוח אותו פעמיים. החתימה מאמתת שהדיווח הגיע מהאתר שלכם, לא את העסקה מול חברת הסליקה.",
     },
     help: {
-      cta: "בקשת עזרה בחיבור", title: "עזרה בחיבור החנות", lead: "נחזור אליכם ונחבר את החנות יחד. בוחרים איך נוח לכם, ומשאירים טלפון.",
+      cta: "בקשת עזרה בחיבור", next: "הבא", title: "עזרה בחיבור החנות", lead: "נחזור אליכם ונחבר את החנות יחד, בטלפון או בשיתוף מסך. משאירים טלפון ובוחרים מה נוח.",
       how: "איך נוח לכם?", channels: { phone: "שיחת טלפון", screen_share: "שיתוף מסך", remote: "שליטה מרחוק בהסכמתכם" } as Record<string, string>,
       channelDesc: { phone: "נדריך אתכם בטלפון, צעד אחרי צעד.", screen_share: "אתם משתפים את המסך, ואנחנו מדריכים.", remote: "בהסכמתכם, נציג שלנו מבצע את החיבור במחשב שלכם בכלי תמיכה מאובטח, ואתם רואים כל פעולה." } as Record<string, string>,
       consent: "אני מסכים/ה לשליטה מרחוק רק בזמן השיחה, בכלי תמיכה מאובטח. לא אתבקש למסור סיסמאות או פרטי תשלום, ואפשר לעצור בכל רגע.",
@@ -381,7 +381,9 @@ export const he = {
     adminConnect: {
       title: "חיבור חנויות (30 ימים)", started: "התחילו חיבור", connected: "התחברו", self: "לבד", guided: "עם הדרכה", assisted: "עם סיוע",
       notConnected: "לא התחברו", unsupported: "פלטפורמות לא נתמכות", reasons: "סיבות כישלון עיקריות", help: "בקשות עזרה פתוחות", noHelp: "אין בקשות פתוחות.",
-      done: "טופל", target: "יעד: 80% מתחברים לבד", ofConnected: "מהמתחברים",
+      done: "טופל", target: "יעד: 80% מתחברים לבד", ofConnected: "מתוך החיבורים שהושלמו", success: "שיעור הצלחה (מכלל הניסיונות)", smallSample: "מדגם קטן מדי לאחוזים", n: "מספר",
+      platforms: { woocommerce: "WooCommerce", wordpress: "WordPress בלי WooCommerce", shopify: "Shopify", wix: "Wix", magento: "Magento", unknown: "פלטפורמה לא מזוהה", custom: "אתר מותאם אישית" } as Record<string, string>,
+      reasonsMap: { unsupported_platform: "פלטפורמה לא נתמכת", no_woocommerce: "WordPress בלי WooCommerce", no_wp_admin: "אין ניהול WordPress בכתובת", redirected: "הכתובת מפנה לאתר אחר", unreachable: "האתר לא זמין", timeout: "האתר לא ענה בזמן", http_error: "האתר החזיר שגיאה", invalid_url: "כתובת לא תקינה", not_public: "כתובת לא ציבורית", too_many_redirects: "יותר מדי הפניות", denied: "בעל החנות לא אישר", install_failed: "ההתקנה נכשלה", plugin_outdated: "תוסף בגרסה ישנה" } as Record<string, string>,
     },
     claims: {
       title: "בירורי מכירות", leadStore: "בירור הוא חריג: משפיען שחושב שמכירה חסרה או שגויה פותח כאן בירור, ואתם מאשרים או מסבירים. המכירות עצמן מגיעות אוטומטית מהחנות.",

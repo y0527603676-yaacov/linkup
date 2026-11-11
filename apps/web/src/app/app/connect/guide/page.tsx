@@ -36,9 +36,11 @@ export default async function ConnectGuide({ searchParams }: { searchParams: Pro
             ? <a className="btn btn-primary" href={`${base}/wp-admin/plugin-install.php?tab=upload`} target="_blank" rel="noopener">{g.openUpload}</a>
             : <p className="small muted" style={{ margin: 0 }}>{g.noLink}</p>)}
           {n === g.steps.length && <Link className="btn btn-primary" href={`/app/connect?${new URLSearchParams({ org: org.id, ...(site ? { site, check: "1" } : {}) })}`}>{g.checkNow}</Link>}
+          {/* One main action per screen: the step's own action, or "next" when the step is only an instruction. */}
+          {(n === 3 || n === 4 || (n === 2 && !woo)) && <Link className="btn btn-primary" href={q(n + 1)}>{g.next}</Link>}
           <div className="row" style={{ gap: 8, justifyContent: "space-between", flexWrap: "wrap" }}>
             {n > 1 ? <Link className="btn btn-ghost btn-sm" href={q(n - 1)}>{g.prev}</Link> : <span />}
-            {n < g.steps.length && <Link className="btn btn-ghost btn-sm" href={q(n + 1)}>{g.next}</Link>}
+            {(n === 1 || (n === 2 && woo)) && <Link className="btn btn-ghost btn-sm" href={q(n + 1)}>{g.next}</Link>}
           </div>
         </section>
         <p className="small" style={{ marginTop: 16 }}>{g.stuck} <Link href={`/app/connect/help?${new URLSearchParams({ org: org.id, site, p: d?.ok ? d.platform : "" })}`}>{t.uc.help.cta}</Link></p>

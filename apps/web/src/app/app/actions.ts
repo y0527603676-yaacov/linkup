@@ -516,9 +516,10 @@ export async function requestConnectHelp(form: FormData) {
   const org = str(form, "org");
   const sb = await getSupabase();
   const { error } = await sb.rpc("request_connect_help", {
-    p_org: org, p_channel: str(form, "channel"), p_phone: str(form, "phone"), p_preferred_time: str(form, "time") || null,
+    // Remote control is not offered yet (phone and screen share only); the database keeps it for later.
+    p_org: org, p_channel: str(form, "channel") === "screen_share" ? "screen_share" : "phone", p_phone: str(form, "phone"), p_preferred_time: str(form, "time") || null,
     p_note: str(form, "note") || null, p_site: str(form, "site") || null, p_platform: str(form, "platform") || null,
-    p_consent_remote: str(form, "consent") === "1",
+    p_consent_remote: false,
   });
   redirect(back("/app/connect/help", org, error ? { error: errorCode(error), site: str(form, "site"), p: str(form, "platform") } : { ok: "sent" }));
 }

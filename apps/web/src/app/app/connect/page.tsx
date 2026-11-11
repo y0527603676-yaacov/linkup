@@ -264,11 +264,8 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
               <>
                 <h2 style={{ margin: 0 }}>{f.unknown.t}</h2>
                 <p style={{ margin: 0 }}>{f.unknown.d}</p>
-                <h3 style={{ margin: "8px 0 0" }}>{u.choicesTitle}</h3>
-                <div className="card card-flat stack" style={{ gap: 6 }}>
-                  <a className="btn btn-ghost btn-sm" href={`/app/connect?${new URLSearchParams({ org: org.id, site: dsite, check: "1", manual: "1" })}`}>{f.unknown.wooYes}</a>
-                </div>
-                <Alternatives />
+                <a className="btn btn-primary btn-block" href={`/app/connect?${new URLSearchParams({ org: org.id, site: dsite, check: "1", manual: "1" })}`}>{f.unknown.wooYes}</a>
+                <details className="small"><summary>{f.unknown.other}</summary><Alternatives /></details>
                 <Retry ghost again />
               </>
             )}

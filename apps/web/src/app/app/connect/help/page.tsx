@@ -33,17 +33,13 @@ export default async function ConnectHelp({ searchParams }: { searchParams: Prom
             <input type="hidden" name="platform" value={sp.p ?? ""} />
             <fieldset className="stack" style={{ border: 0, padding: 0, margin: 0, gap: 8 }}>
               <legend className="small"><b>{h.how}</b></legend>
-              {(["phone", "screen_share", "remote"] as const).map((c, i) => (
+              {(["phone", "screen_share"] as const).map((c, i) => (
                 <label key={c} className="row" style={{ gap: 8, alignItems: "flex-start" }}>
                   <input type="radio" name="channel" value={c} defaultChecked={i === 0} required style={{ marginTop: 4 }} />
                   <span><b>{h.channels[c]}</b><br /><span className="small muted">{h.channelDesc[c]}</span></span>
                 </label>
               ))}
             </fieldset>
-            <label className="row small" style={{ gap: 8, alignItems: "flex-start" }}>
-              <input type="checkbox" name="consent" value="1" style={{ marginTop: 3 }} />
-              <span>{h.consent}</span>
-            </label>
             <label className="field"><span>{h.phone}</span><input name="phone" required type="tel" inputMode="tel" dir="ltr" autoComplete="tel" /></label>
             <label className="field"><span>{h.time}</span><input name="time" maxLength={80} placeholder={h.timePh} /></label>
             <label className="field"><span>{h.note}</span><textarea name="note" rows={3} maxLength={500} /></label>

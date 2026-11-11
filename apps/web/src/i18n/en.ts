@@ -204,7 +204,7 @@ export const en: Dict = {
       },
       wpNoWoo: { t: "The site runs on WordPress, but we didn't find WooCommerce", d: "LINKUP connects to WooCommerce stores. If your store is on another site, check its address. If WooCommerce is installed but inactive, activate it and check again." },
       unsupported: { t: "Your store runs on {p}", d: "There's no connection for {p} yet. Right now only WooCommerce stores can be connected. We'd love to hear that you're waiting for it." },
-      unknown: { t: "We couldn't tell which system your store runs on", d: "The site may block automatic checks, or it runs on a system we don't support yet. If your store is on WooCommerce, we'll check that this address has a WordPress dashboard and continue from there.", wooYes: "My store is on WooCommerce" },
+      unknown: { t: "We couldn't identify the store", d: "If your store runs on WooCommerce, continue here.", wooYes: "My store is on WooCommerce", other: "Our site was custom-built" },
       errors: {
         invalid_url: "That address doesn't look valid. Try for example: myshop.com",
         not_public: "We can't check this address. Make sure it's your store's public address.",
@@ -358,7 +358,7 @@ export const en: Dict = {
       trust: "Good to know: every report is signed with the store's key, so it can't be forged or sent twice. The signature verifies the report came from your site, not the transaction with the payment provider.",
     },
     help: {
-      cta: "Ask for help connecting", title: "Help connecting your store", lead: "We'll call you back and connect the store together. Choose what suits you and leave a phone number.",
+      cta: "Ask for help connecting", next: "Next", title: "Help connecting your store", lead: "We'll call you back and connect the store together, by phone or screen share. Leave a phone number and choose what suits you.",
       how: "What suits you?", channels: { phone: "Phone call", screen_share: "Screen share", remote: "Remote control with your consent" } as Record<string, string>,
       channelDesc: { phone: "We guide you by phone, step by step.", screen_share: "You share your screen and we guide you.", remote: "With your consent, our agent does the connection on your computer in a secure support tool, and you see every action." } as Record<string, string>,
       consent: "I agree to remote control only during the call, in a secure support tool. I will not be asked for passwords or payment details, and I can stop at any moment.",
@@ -382,7 +382,9 @@ export const en: Dict = {
     adminConnect: {
       title: "Store connections (30 days)", started: "Started", connected: "Connected", self: "On their own", guided: "With the guide", assisted: "With assistance",
       notConnected: "Not connected", unsupported: "Unsupported platforms", reasons: "Top failure reasons", help: "Open help requests", noHelp: "No open requests.",
-      done: "Done", target: "Goal: 80% connect on their own", ofConnected: "of connected",
+      done: "Done", target: "Goal: 80% connect on their own", ofConnected: "of completed connections", success: "Success rate (of all attempts)", smallSample: "Sample too small for percentages", n: "Count",
+      platforms: { woocommerce: "WooCommerce", wordpress: "WordPress without WooCommerce", shopify: "Shopify", wix: "Wix", magento: "Magento", unknown: "Unidentified platform", custom: "Custom site" } as Record<string, string>,
+      reasonsMap: { unsupported_platform: "Unsupported platform", no_woocommerce: "WordPress without WooCommerce", no_wp_admin: "No WordPress admin at the address", redirected: "Address redirects elsewhere", unreachable: "Site unreachable", timeout: "Site did not answer in time", http_error: "Site returned an error", invalid_url: "Invalid address", not_public: "Not a public address", too_many_redirects: "Too many redirects", denied: "Owner did not approve", install_failed: "Install failed", plugin_outdated: "Outdated plugin" } as Record<string, string>,
     },
     claims: {
       title: "Sale inquiries", leadStore: "An inquiry is an exception: a creator who thinks a sale is missing or wrong opens one here, and you confirm or explain. Sales themselves arrive automatically from the store.",

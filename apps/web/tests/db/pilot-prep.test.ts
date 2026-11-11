@@ -55,7 +55,10 @@ describe("fee terms (locked per store)", () => {
     await rpc(u.admin!, "set_new_store_pricing", { p_founders_bps: 150, p_founders_months: 3, p_standard_bps: 250, p_note: "pilot test" });
     expect(await q(`select fee_bps from fee_terms where store_org_id = $1 order by effective_from`, [org.S])).toEqual([{ fee_bps: 200 }, { fee_bps: 300 }]);
     org.N = await rpc(u.late!, "create_organization", { p_type: "store", p_name: "Late Store" });
-    await rpc(u.late!, "create_store_connection", { p_org: org.N, p_site_url: "late.co.il" });
+    const k = await rpc(u.late!, "create_store_connection", { p_org: org.N, p_site_url: "late.co.il" });
+    // Terms lock at the first verified connection (approved 11.11.2026), not when the key is issued.
+    expect(await q(`select fee_bps from fee_terms where store_org_id = $1`, [org.N])).toEqual([]);
+    await rpc({ role: "service_role" } as any, "plugin_sync", { p_connection: k.connection_id, p_plugin_version: "0.4.1" });
     expect(await q(`select fee_bps from fee_terms where store_org_id = $1 order by effective_from`, [org.N])).toEqual([{ fee_bps: 150 }, { fee_bps: 250 }]);
     await sale("S", "f-2");
     expect(await feeOf("f-2")).toBe(200); // existing store unaffected
