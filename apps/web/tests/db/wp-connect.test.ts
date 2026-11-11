@@ -88,3 +88,40 @@ describe("disconnect", () => {
     expect(await db.as({ role: "owner" }, `select 1 from store_install_consents where org_id = $1`, [org])).not.toHaveLength(0);
   });
 });
+
+describe("one-store pilot", () => {
+  let pilot = "", admin: Who;
+  const settingsFingerprint = () => db.one<{ s: string }>({ role: "owner" },
+    `select string_agg(key || '=' || value::text, ',' order by key) s from app_settings where key <> 'wp_connect_pilot_org'`);
+  beforeAll(async () => {
+    u.ps = { role: "authenticated", userId: await createUser(db, "pilot@wpc.test") };
+    pilot = await call(u.ps!, "create_organization", { p_type: "store", p_name: "Pilot store" });
+    admin = { role: "authenticated", userId: await createUser(db, "admin@wpc.test") };
+    await db.as({ role: "owner" }, `insert into platform_admins(user_id) values ($1)`, [(admin as any).userId]);
+  });
+  it("nothing is open by default: no pilot store, the real store cannot start", async () => {
+    expect(await call(u.ps!, "wp_connect_available", { p_org: pilot })).toBe(false);
+    await expect(start(u.ps!, pilot)).rejects.toThrow(/not_available/);
+  });
+  it("only a platform admin can choose it; test accounts and non-stores are refused", async () => {
+    await expect(call(u.ps!, "admin_set_wp_pilot_store", { p_org: pilot })).rejects.toThrow(/forbidden/);
+    await expect(call(admin, "admin_set_wp_pilot_store", { p_org: org })).rejects.toThrow(/not_a_store/);   // org is a test account
+  });
+  it("allows exactly that one store; other real stores stay closed; nothing else changes", async () => {
+    const before = await settingsFingerprint();
+    u.o2 = { role: "authenticated", userId: await createUser(db, "other2@wpc.test") };
+    const other2 = await call(u.o2!, "create_organization", { p_type: "store", p_name: "Other real" });
+    await call(admin, "admin_set_wp_pilot_store", { p_org: pilot });
+    expect(await call(u.ps!, "wp_connect_available", { p_org: pilot })).toBe(true);
+    expect(await call(u.o2!, "wp_connect_available", { p_org: other2 })).toBe(false);
+    expect((await start(u.ps!, pilot)).site_url).toBe("https://shop.example.com");
+    await expect(start(u.ps!, pilot, "http://127.0.0.1:8090")).rejects.toThrow(/https_required|invalid_url/);   // a real store: HTTPS only
+    expect((await settingsFingerprint()).s).toBe(before.s);   // sign-up, billing, rates, open flags untouched
+    const audit = await db.as<any>({ role: "owner" }, `select 1 from audit_events where action = 'setting.wp_pilot_store'`);
+    expect(audit.length).toBeGreaterThan(0);
+  });
+  it("choosing another store replaces it (one at a time); clearing closes it", async () => {
+    await call(admin, "admin_set_wp_pilot_store", { p_org: null });
+    expect(await call(u.ps!, "wp_connect_available", { p_org: pilot })).toBe(false);
+  });
+});

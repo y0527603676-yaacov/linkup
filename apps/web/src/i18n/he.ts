@@ -367,6 +367,7 @@ export const he = {
   },
   admin: {
     tabs: { overview: "סקירה וצמיחה", orgs: "חנויות ומשפיענים", finance: "כספים והתחשבנות", settings: "הגדרות ומסמכים" },
+    wpPilot: { title: "חנות פיילוט – חיבור באישור אחד", note: "חנות אמיתית אחת בלבד שתוכל להשתמש בחיבור באישור אחד, כשהוא סגור לכל השאר. לא משנה הרשמה, גבייה, תעריפים או הסכמים. בחירה חדשה מחליפה את הקודמת.", none: "ללא (סגור)", current: "חנות הפיילוט כעת", closed: "סגור: אין חנות פיילוט." },
     settingLabels: { founding_partners_open: "תוכנית FOUNDING PARTNERS פתוחה", woo_api_connect_open: "חיבור מהיר בלי תוסף פתוח לכל החנויות" } as Record<string, string>,
     ov: {
       realOnly: (n: number) => `נתונים אמיתיים בלבד${n ? ` (${n} פעילויות בדיקה מוסתרות)` : ""}.`, withTest: "כולל פעילויות בדיקה.", showTest: "הצגה כולל בדיקה", showReal: "נתונים אמיתיים בלבד",

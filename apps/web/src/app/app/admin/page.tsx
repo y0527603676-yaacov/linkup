@@ -286,6 +286,19 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
             <select name="value" defaultValue={String(d.settings?.[k])} style={{ width: "auto" }}><option value="true">true</option><option value="false">false</option></select>
             <button className="btn btn-ghost btn-sm">{t.common.save}</button></form>))}</div>
       </section>
+      <section className="section"><H>{a.wpPilot.title}</H>
+        <p className="small muted">{a.wpPilot.note}</p>
+        <form action={adminAction} className="item" style={{ flexWrap: "wrap", gap: 8 }}>{hidden}<input type="hidden" name="op" value="wp_pilot" />
+          <select name="target" defaultValue={String(settings.wp_connect_pilot_org ?? "")} style={{ width: "auto", maxWidth: "100%" }}>
+            <option value="">{a.wpPilot.none}</option>
+            {stores.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          <button className="btn btn-ghost btn-sm">{t.common.save}</button>
+          <span className="small muted" style={{ width: "100%" }}>{settings.wp_connect_pilot_org
+            ? `${a.wpPilot.current}: ${stores.find((s: any) => s.id === settings.wp_connect_pilot_org)?.name ?? settings.wp_connect_pilot_org}`
+            : a.wpPilot.closed}</span>
+        </form>
+      </section>
       <section className="section"><H>{t.legal.drafts}</H>
         <p className="small muted">{t.legal.draftNote}</p>
         <p className="small alert alert-warn">{a.nextVersionFix}</p>

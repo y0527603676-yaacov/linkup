@@ -368,6 +368,7 @@ export const en: Dict = {
   },
   admin: {
     tabs: { overview: "Overview & growth", orgs: "Stores & creators", finance: "Money & settlement", settings: "Settings & documents" },
+    wpPilot: { title: "Pilot store – connect with one approval", note: "A single real store that may use connect-with-one-approval while it stays closed for everyone else. Does not change sign-up, billing, rates or agreements. A new choice replaces the previous one.", none: "None (closed)", current: "Current pilot store", closed: "Closed: no pilot store." },
     settingLabels: { founding_partners_open: "FOUNDING PARTNERS program open", woo_api_connect_open: "Quick connect without a plugin open to all stores" } as Record<string, string>,
     ov: {
       realOnly: (n: number) => `Real data only${n ? ` (${n} test activities hidden)` : ""}.`, withTest: "Including test activities.", showTest: "Include test", showReal: "Real data only",
