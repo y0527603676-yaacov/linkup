@@ -56,19 +56,14 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
     </div>
   );
   const u = t.uc;
-  /** Other supported ways to connect (only ones that really work today). */
-  const Alternatives = ({ api = true }: { api?: boolean }) => (
+  /** The other automatic way to connect (custom sites); if neither fits, the site cannot be tracked yet. */
+  const Alternatives = () => (
     <div className="stack" style={{ gap: 10, marginTop: 4 }}>
-      {api && (
-        <div className="card card-flat stack" style={{ gap: 6 }}>
-          <b>{u.api.t}</b><p className="small muted" style={{ margin: 0 }}>{u.api.d}</p>
-          <a className="btn btn-ghost btn-sm" href={`/app/connect/api?${new URLSearchParams({ org: org.id, site: dsite })}`}>{u.api.cta}</a>
-        </div>
-      )}
       <div className="card card-flat stack" style={{ gap: 6 }}>
-        <b>{u.manual.t}</b><p className="small muted" style={{ margin: 0 }}>{u.manual.d}</p>
-        <a className="btn btn-ghost btn-sm" href={`/app/sales?${new URLSearchParams({ org: org.id, site: dsite })}`}>{u.manual.cta}</a>
+        <b>{u.api.t}</b><p className="small muted" style={{ margin: 0 }}>{u.api.d}</p>
+        <a className="btn btn-ghost btn-sm" href={`/app/connect/api?${new URLSearchParams({ org: org.id, site: dsite })}`}>{u.api.cta}</a>
       </div>
+      <p className="small muted" style={{ margin: 0 }}>{u.noAuto}</p>
     </div>
   );
   const names: Record<string, string> = { shopify: "Shopify", wix: "Wix", magento: "Magento" };
@@ -93,11 +88,11 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
         {c && (
           <div className="card card-flat stack" style={{ marginBottom: 16, gap: 6 }}>
             <p className="row" style={{ margin: 0 }}><span className={`dot${connected && !c.last_error ? "" : " dot-off"}`} /><b>{t.dash.connection[c.status]}</b> · <span className="ltr">{c.site_url}</span></p>
-            <p className="small muted" style={{ margin: 0 }}>{c.method === "api" ? l.viaApi : c.method === "signed_api" ? u.viaCustom : c.method === "manual" ? u.viaManual : l.viaPlugin}
+            <p className="small muted" style={{ margin: 0 }}>{c.method === "api" ? l.viaApi : c.method === "signed_api" ? u.viaCustom : l.viaPlugin}
               {c.last_sync_at ? ` · ${t.dash.connection.lastSync}: ${shortDate(c.last_sync_at, locale)}` : ""}
               {c.method === "plugin" && c.plugin_version ? ` · v${c.plugin_version}` : ""}</p>
-            {c.method === "manual" && c.status === "connected" && <a className="btn btn-primary btn-sm" href={`/app/sales?org=${org.id}`}>{u.toSales}</a>}
             {c.method === "signed_api" && <a className="btn btn-ghost btn-sm" href={`/app/connect/api?org=${org.id}`}>{u.toApi}</a>}
+            {c.status === "connected" && <a className="small" href={`/app/claims?org=${org.id}`}>{u.claims.title}</a>}
             {c.last_error && <p className="alert alert-warn small" style={{ margin: 0 }}>{l.errors[c.last_error] ?? l.errors.other}</p>}
             {c.method === "api" && c.status !== "disconnected" && (
               <form action={syncWooApi}><input type="hidden" name="org" value={org.id} /><button className="btn btn-ghost btn-sm">{l.syncNow}</button></form>
@@ -233,7 +228,7 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
               <>
                 <h2 style={{ margin: 0 }}>{f.unsupported.t.replace("{p}", names[platform] ?? platform)}</h2>
                 <p style={{ margin: 0 }}>{u.platformSoon.replace("{p}", names[platform] ?? platform)} <a href="/contact">{l.tellUs}</a></p>
-                <Alternatives api={false} />
+                
                 <Retry ghost label={f.otherSite} />
               </>
             ) : wantManual && adminOk ? (

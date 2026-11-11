@@ -46,8 +46,7 @@ describe("existing connections are untouched", () => {
     await rpc(svc, "plugin_sync", { p_connection: k.connection_id, p_plugin_version: "0.4.1" });
     expect((await q(`select platform, method, status from store_connections where id = $1`, [k.connection_id]))[0])
       .toEqual({ platform: "woocommerce", method: "plugin", status: "connected" });
-    for (const kind of ["manual", "custom"])
-      await expect(rpc(woo, "create_platform_connection", { p_org: wooOrg, p_site_url: "woo.co.il", p_kind: kind })).rejects.toThrow(/already_connected/);
+    await expect(rpc(woo, "create_api_connection", { p_org: wooOrg, p_site_url: "woo.co.il" })).rejects.toThrow(/already_connected/);
     expect(await rpc(woo, "tracking_mode", { p_store: wooOrg })).toBe("automatic");
   });
 });
@@ -55,18 +54,35 @@ describe("existing connections are untouched", () => {
 describe("custom site: signed API (same endpoint and ingestion as the plugin)", () => {
   let conn: string;
   it("only a store admin creates it; key shown once in the plugin's format; pending until the first signed call", async () => {
-    await expect(rpc(staff, "create_platform_connection", { p_org: storeOrg, p_site_url: "api.custom.co.il", p_kind: "custom" })).rejects.toThrow(/forbidden/);
-    await expect(rpc(stranger, "create_platform_connection", { p_org: storeOrg, p_site_url: "api.custom.co.il", p_kind: "custom" })).rejects.toThrow(/forbidden/);
-    await expect(rpc(creator, "create_platform_connection", { p_org: creatorOrg, p_site_url: "x.co.il", p_kind: "custom" })).rejects.toThrow(/not_a_store/);
-    await expect(rpc(store, "create_platform_connection", { p_org: storeOrg, p_site_url: "api.custom.co.il", p_kind: "magic" })).rejects.toThrow(/invalid_input/);
-    const r = await rpc(store, "create_platform_connection", { p_org: storeOrg, p_site_url: "api.custom.co.il", p_kind: "custom" });
+    await expect(rpc(staff, "create_api_connection", { p_org: storeOrg, p_site_url: "api.custom.co.il" })).rejects.toThrow(/forbidden/);
+    await expect(rpc(stranger, "create_api_connection", { p_org: storeOrg, p_site_url: "api.custom.co.il" })).rejects.toThrow(/forbidden/);
+    await expect(rpc(creator, "create_api_connection", { p_org: creatorOrg, p_site_url: "x.co.il" })).rejects.toThrow(/not_a_store/);
+    await expect(rpc(store, "create_api_connection", { p_org: storeOrg, p_site_url: "not a url" })).rejects.toThrow(/invalid_url/);
+    const r = await rpc(store, "create_api_connection", { p_org: storeOrg, p_site_url: "api.custom.co.il" });
     conn = r.connection_id;
     expect(r.connection_key).toMatch(/^lk_[0-9a-f]{32}_[A-Za-z0-9]{64}$/);
     expect((await q(`select platform, method, status from store_connections where id = $1`, [conn]))[0]).toEqual({ platform: "custom", method: "signed_api", status: "pending" });
     expect(await rpc(store, "tracking_mode", { p_store: storeOrg })).toBe("none");
+    // Founders clock: creating a key is a technical step only – it does not start the benefit period.
+    expect((await q(`select founders_until from organizations where id = $1`, [storeOrg]))[0].founders_until).toBeNull();
     const sync = await rpc(svc, "plugin_sync", { p_connection: conn, p_plugin_version: "api" });
     expect(sync.coupons.map((c: any) => c.code)).toContain(code);           // the site can create the partner coupons itself
     expect(await rpc(store, "tracking_mode", { p_store: storeOrg })).toBe("store_api");
+    // …it starts when the site is really connected (first signed call).
+    const fu = new Date((await q(`select founders_until from organizations where id = $1`, [storeOrg]))[0].founders_until);
+    expect(fu.getTime()).toBeGreaterThan(Date.now() + 150 * 86400_000);
+    // A second connection later never moves it.
+    await q(`update store_connections set status = 'pending' where id = $1`, [conn]);
+    await rpc(svc, "plugin_sync", { p_connection: conn, p_plugin_version: "api" });
+    expect(new Date((await q(`select founders_until from organizations where id = $1`, [storeOrg]))[0].founders_until).getTime()).toBe(fu.getTime());
+  });
+  it("a store that already has founders terms (WooCommerce key) keeps them unchanged", async () => {
+    const before = (await q(`select founders_until from organizations where id = $1`, [wooOrg]))[0].founders_until;
+    expect(before).not.toBeNull();
+    const k = (await q(`select id from store_connections where org_id = $1`, [wooOrg]))[0].id;
+    await q(`update store_connections set status = 'pending' where id = $1`, [k]);
+    await rpc(svc, "plugin_sync", { p_connection: k, p_plugin_version: "0.4.1" });
+    expect((await q(`select founders_until from organizations where id = $1`, [wooOrg]))[0].founders_until).toEqual(before);
   });
   it("orders: unique per order id, duplicates ignored, refunds and cancellations reverse the commission", async () => {
     const ev = (id: string, extra: Record<string, unknown> = {}, evt = `e-${id}`) => rpc(svc, "ingest_order_event", { p_connection: conn,
@@ -80,49 +96,59 @@ describe("custom site: signed API (same endpoint and ingestion as the plugin)", 
     await ev("A1", { status: "cancelled" }, "e-A1-c");
     expect(await creatorTotal("A1")).toBe(0);
   });
+  it("an older event arriving late (network retry) never overwrites a newer state", async () => {
+    const at = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
+    const send = (evt: string, occurred: string, status: string) => rpc(svc, "ingest_order_event", { p_connection: conn,
+      p_event: JSON.stringify({ event_id: evt, type: "order.upserted", occurred_at: occurred,
+        order: { id: "B7", status, currency: "ILS", total: 11_800, tax: 1_800, shipping: 0, coupons: [code], created_at: at(30), refunds: [] } }) });
+    await send("b7-new", at(1), "cancelled");
+    await send("b7-old", at(20), "completed");      // delivered late
+    expect((await q(`select status from orders where external_order_id = 'B7'`))[0].status).toBe("cancelled");
+    expect(await creatorTotal("B7")).toBe(0);
+  });
+  it("switching to the plugin on the same address keeps the same connection, orders and commissions", async () => {
+    const before = await creatorTotal("A1");
+    const k = await rpc(store, "create_store_connection", { p_org: storeOrg, p_site_url: "api.custom.co.il" });
+    expect(k.connection_id).toBe(conn);
+    expect((await q(`select platform, method, status from store_connections where id = $1`, [conn]))[0]).toEqual({ platform: "woocommerce", method: "plugin", status: "pending" });
+    expect((await q(`select count(*)::int n from orders where connection_id = $1`, [conn]))[0].n).toBeGreaterThan(0);
+    expect(await creatorTotal("A1")).toBe(before);
+    await rpc(svc, "plugin_sync", { p_connection: conn, p_plugin_version: "0.4.1" });
+    const again = await rpc(store, "create_api_connection", { p_org: storeOrg, p_site_url: "api.custom.co.il" }).catch((e: Error) => e.message);
+    expect(String(again)).toMatch(/already_connected/);           // a working plugin connection is never taken over
+  });
+  it("the same sale reported by two connections of one store earns one commission", async () => {
+    const other = await rpc(store, "create_api_connection", { p_org: storeOrg, p_site_url: "www.api.custom.co.il" });
+    await rpc(svc, "plugin_sync", { p_connection: other.connection_id, p_plugin_version: "api" });
+    const now = new Date().toISOString();
+    const ev = (c: string, e: string) => rpc(svc, "ingest_order_event", { p_connection: c, p_event: JSON.stringify({ event_id: e, type: "order.upserted", occurred_at: now,
+      order: { id: "D9", status: "completed", currency: "ILS", total: 23_600, tax: 3_600, shipping: 0, coupons: [code], created_at: now, refunds: [] } }) });
+    expect((await ev(conn, "d9-a")).attributed).toBe(true);
+    expect((await ev(other.connection_id, "d9-b")).attributed).toBe(false);
+    expect(await creatorTotal("D9")).toBe(2_000);
+    expect((await q(`select count(*)::int n from audit_events where action = 'attribution.duplicate_skipped'`))[0].n).toBe(1);
+    expect((await q(`select count(*)::int n from funnel_events where org_id is null`))[0].n).toBe(0);
+  });
+  it("a different order with the same number on another site of the store is still attributed", async () => {
+    const other = (await q(`select id from store_connections where site_url like '%www.api.custom%'`))[0].id;
+    const now = new Date().toISOString();
+    const r = await rpc(svc, "ingest_order_event", { p_connection: other, p_event: JSON.stringify({ event_id: "d9-c", type: "order.upserted", occurred_at: now,
+      order: { id: "D10", status: "completed", currency: "ILS", total: 5_900, tax: 900, shipping: 0, coupons: [code], created_at: now, refunds: [] } }) });
+    expect(r.attributed).toBe(true);
+  });
+  it("manual reporting does not exist; manual connection kinds are rejected", async () => {
+    await expect(rpc(store, "manual_report_order", { p_org: storeOrg })).rejects.toThrow(/does not exist/);
+    await expect(q(`insert into store_connections(org_id, site_url, platform, method) values ($1, 'https://m.co.il', 'manual', 'manual')`, [storeOrg])).rejects.toThrow(/check/);
+  });
   it("a tracking-only report (no order) never creates a commission", async () => {
     await expect(rpc(svc, "ingest_order_event", { p_connection: conn, p_event: JSON.stringify({ event_id: "v1", type: "visit", occurred_at: new Date().toISOString() }) }))
       .rejects.toThrow(/invalid_event/);
   });
-});
-
-describe("manual coupon mode", () => {
-  it("connected at once; labelled 'manual'; only admins report; only this store's partner coupons", async () => {
-    await expect(rpc(store, "manual_report_order", { p_org: storeOrg, p_order_id: "1001", p_order_date: TODAY, p_total_minor: 23_600, p_shipping_minor: 0, p_coupon: code }))
-      .rejects.toThrow(/not_available/);
-    await rpc(store, "create_platform_connection", { p_org: storeOrg, p_site_url: "custom.co.il", p_kind: "manual" });
-    expect(await rpc(store, "store_tracking_modes", { p_stores: `{${storeOrg},${wooOrg}}` })).toEqual({ [storeOrg]: "store_api", [wooOrg]: "automatic" });
-    await expect(rpc(staff, "manual_report_order", { p_org: storeOrg, p_order_id: "1001", p_order_date: TODAY, p_total_minor: 23_600, p_shipping_minor: 0, p_coupon: code })).rejects.toThrow(/forbidden/);
-    await expect(rpc(stranger, "manual_report_order", { p_org: storeOrg, p_order_id: "1001", p_order_date: TODAY, p_total_minor: 23_600, p_shipping_minor: 0, p_coupon: code })).rejects.toThrow(/forbidden/);
-    await expect(rpc(store, "manual_report_order", { p_org: storeOrg, p_order_id: "1001", p_order_date: TODAY, p_total_minor: 23_600, p_shipping_minor: 0, p_coupon: "NOTMINE" })).rejects.toThrow(/bad_code/);
-    await expect(rpc(store, "manual_report_order", { p_org: storeOrg, p_order_id: "1001", p_order_date: "2099-01-01", p_total_minor: 23_600, p_shipping_minor: 0, p_coupon: code })).rejects.toThrow(/invalid_dates/);
-    await expect(rpc(store, "manual_report_order", { p_org: storeOrg, p_order_id: "1001", p_order_date: TODAY, p_total_minor: 0, p_shipping_minor: 0, p_coupon: code })).rejects.toThrow(/invalid_amount/);
-  });
-  it("a reported order goes through the normal engine (implied VAT, refund window), once per order id", async () => {
-    const r = await rpc(store, "manual_report_order", { p_org: storeOrg, p_order_id: "1001", p_order_date: TODAY, p_total_minor: 24_600, p_shipping_minor: 1_000, p_coupon: code.toLowerCase() });
-    expect(r.attributed).toBe(true);
-    expect(await creatorTotal("1001")).toBe(2_000);                           // (246 − 10) / 1.18 = 200 → 10%
-    expect((await q(`select state from commission_ledger l join attributions a on a.id = l.attribution_id join orders o on o.id = a.order_id where o.external_order_id = '1001' limit 1`))[0].state).toBe("pending");
-    await expect(rpc(store, "manual_report_order", { p_org: storeOrg, p_order_id: "1001", p_order_date: TODAY, p_total_minor: 24_600, p_shipping_minor: 1_000, p_coupon: code })).rejects.toThrow(/order_exists/);
-    const list = await rpc(store, "manual_orders", { p_org: storeOrg });
-    expect(list[0]).toMatchObject({ id: "1001", status: "completed", commission_minor: 2_000, creator: "Noa" });
-    expect((await q(`select count(*)::int n from audit_events where action = 'manual_sale.reported' and target = '1001'`))[0].n).toBe(1);
-  });
-  it("partial refund, then cancellation; never more than was paid; others cannot touch it", async () => {
-    await expect(rpc(store, "manual_update_order", { p_org: storeOrg, p_order_id: "1001", p_action: "refunded", p_amount_minor: 99_999 })).rejects.toThrow(/invalid_amount/);
-    await expect(rpc(staff, "manual_update_order", { p_org: storeOrg, p_order_id: "1001", p_action: "cancelled" })).rejects.toThrow(/forbidden/);
-    await expect(rpc(woo, "manual_update_order", { p_org: storeOrg, p_order_id: "1001", p_action: "cancelled" })).rejects.toThrow(/forbidden/);
-    await rpc(store, "manual_update_order", { p_org: storeOrg, p_order_id: "1001", p_action: "refunded", p_amount_minor: 11_800 });
-    expect(await creatorTotal("1001")).toBe(1_041);          // refunds reduce proportionally (same rule as WooCommerce)
-    await rpc(store, "manual_update_order", { p_org: storeOrg, p_order_id: "1001", p_action: "cancelled" });
-    expect(await creatorTotal("1001")).toBe(0);
-    await expect(rpc(store, "manual_update_order", { p_org: storeOrg, p_order_id: "nope", p_action: "cancelled" })).rejects.toThrow(/not_found/);
-  });
-  it("issuing a plugin key for the same address turns it back into a WooCommerce plugin connection", async () => {
-    await rpc(store, "create_platform_connection", { p_org: storeOrg, p_site_url: "switch.co.il", p_kind: "manual" });
-    const k = await rpc(store, "create_store_connection", { p_org: storeOrg, p_site_url: "switch.co.il" });
-    expect((await q(`select platform, method from store_connections where id = $1`, [k.connection_id]))[0]).toEqual({ platform: "woocommerce", method: "plugin" });
-    expect((await q(`select status from store_connections where id = $1`, [k.connection_id]))[0].status).toBe("pending");   // connected only after the plugin reports
+  it("disconnecting revokes: the store shows as not tracked and further reports are refused", async () => {
+    await rpc(store, "disconnect_store", { p_org: storeOrg });
+    expect(await rpc(store, "tracking_mode", { p_store: storeOrg })).toBe("none");
+    await expect(rpc(svc, "ingest_order_event", { p_connection: (await q(`select id from store_connections where org_id = $1 limit 1`, [storeOrg]))[0].id,
+      p_event: JSON.stringify({ event_id: "after-disconnect", type: "order.upserted", occurred_at: new Date().toISOString(), order: { id: "Z1" } }) })).rejects.toThrow(/connection_disconnected/);
   });
 });
 
@@ -153,7 +179,7 @@ describe("sale claims (missing or wrong sales)", () => {
 describe("creator view", () => {
   it("lists partner stores with how their sales are tracked; members only", async () => {
     const r = await rpc(creator, "my_partner_stores", { p_creator: creatorOrg });
-    expect(r).toEqual([{ agreement_id: agreement, store_org_id: storeOrg, store_name: "Custom Shop", tracking: "store_api" }]);
+    expect(r).toEqual([{ agreement_id: agreement, store_org_id: storeOrg, store_name: "Custom Shop", tracking: "none" }]);
     await expect(rpc(stranger, "my_partner_stores", { p_creator: creatorOrg })).rejects.toThrow(/forbidden/);
   });
 });
@@ -171,4 +197,18 @@ describe("prepared adapters feed the same engine (no change to fees or ledger)",
     expect(await creatorTotal("9001")).toBe(1_000);
     expect((await rpc(svc, "ingest_order_event", { p_connection: sh, p_event: JSON.stringify(e1) })).status).toBe("duplicate");
   });
+});
+
+describe("safe rollback", () => {
+  it("the rollback script applies cleanly on a database that does not use the new kinds, and WooCommerce keys still work", async () => {
+    const fresh = await createDb();
+    const { readFileSync } = await import("node:fs");
+    const down = readFileSync(new URL("../../../../supabase/rollback/20261111101700.down.sql", import.meta.url), "utf8");
+    await fresh.exec(down);
+    const u = { role: "authenticated", userId: await createUser(fresh, "rb@x.co.il") } as Who;
+    const org = (await fresh.one<{ r: string }>(u, `select public.create_organization(p_type => 'store', p_name => 'RB') as r`)).r;
+    const k = (await fresh.one<{ r: any }>(u, `select public.create_store_connection(p_org => $1, p_site_url => 'rb.co.il') as r`, [org])).r;
+    expect(k.connection_key).toMatch(/^lk_/);
+    await expect(fresh.as(owner, `insert into store_connections(org_id, site_url, platform, method) values ($1, 'https://c.co.il', 'custom', 'signed_api')`, [org])).rejects.toThrow(/check/);
+  }, 120_000);
 });

@@ -1,34 +1,36 @@
--- Universal Connect, stage 1–3: one connection layer for every platform.
+-- Universal Connect: one automatic connection layer for every platform (no manual sales reporting).
 --
--- * store_connections.platform / method accept the new kinds. Existing rows (WooCommerce plugin / API) are unchanged.
---     platform: woocommerce | shopify | wix | custom | manual
---     method:   plugin | api (WooCommerce REST) | app (Shopify/Wix, later) | signed_api (custom sites) | manual
--- * Custom sites ("custom" + "signed_api"): the same signed endpoint and the same order ingestion the WooCommerce
---   plugin already uses (HMAC per connection, unique event ids, refunds/cancellations, refund window).
---   A signature proves WHO sent the report, not that the sale really happened – shown that way in the app.
--- * Manual coupon mode ("manual"): the store reports sales per order id (with its partner coupon), cancellations and
---   refunds inside LINKUP. Goes through the same ingestion, labelled "reported by the store".
--- * Sale claims: a creator can report a sale that is missing or wrong; the store answers. History is kept.
--- * Nothing here creates a commission from a tracking event alone; commissions still come only from order events.
+-- * store_connections.platform / method accept the new kinds. Existing rows (WooCommerce plugin / REST) are unchanged.
+--     platform: woocommerce | shopify | wix | custom
+--     method:   plugin | api (WooCommerce REST) | app (Shopify / Wix, when built) | signed_api (custom sites)
+-- * Custom sites (custom / signed_api): the same signed endpoint and the same order ingestion the WooCommerce plugin
+--   already uses (HMAC per connection, unique order ids, duplicate events ignored, refunds/cancellations, refund window).
+--   A signature proves WHO sent the report, not that the sale happened – shown that way in the app.
+-- * Switching connection method never loses data (same address = same connection row, same orders) and a sale reported
+--   by two connections of the same store never earns two commissions (guard on attributions).
+-- * Founders pricing clock: for connections created here it starts when the store is actually connected (first signed
+--   call), not when a key is created. Existing behaviour of the WooCommerce key is NOT changed here.
+-- * Sale claims: an exception channel for a missing or wrong sale (not a reporting path).
+-- * Commissions still come only from order events; nothing here creates one from a visit or click.
 -- No change to fees, agreements, entitlements, existing connections or data. No DROP of data or policies
 -- (two CHECK constraints are replaced by wider ones).
 
 alter table public.store_connections drop constraint if exists store_connections_platform_check;
 alter table public.store_connections add constraint store_connections_platform_check
-  check (platform in ('woocommerce', 'shopify', 'wix', 'custom', 'manual'));
+  check (platform in ('woocommerce', 'shopify', 'wix', 'custom'));
 alter table public.store_connections drop constraint if exists store_connections_method_check;
 alter table public.store_connections add constraint store_connections_method_check
-  check (method in ('plugin', 'api', 'app', 'signed_api', 'manual'));
+  check (method in ('plugin', 'api', 'app', 'signed_api'));
 
 /* ---------- How a store's sales reach LINKUP (shown to creators; not sensitive) ---------- */
 -- automatic = WooCommerce plugin / REST or a platform app; store_api = the store's own system via signed API;
--- manual = reported by hand in LINKUP; none = no working connection.
+-- none = no working automatic connection (no sales tracking is shown).
 create or replace function public.tracking_mode(p_store uuid) returns text
 language sql stable security definer set search_path to '' as $$
   select coalesce((
-    select case when c.method = 'manual' then 'manual' when c.method = 'signed_api' then 'store_api' else 'automatic' end
+    select case when c.method = 'signed_api' then 'store_api' else 'automatic' end
       from public.store_connections c where c.org_id = p_store and c.status = 'connected'
-     order by case when c.method in ('plugin', 'api', 'app') then 0 when c.method = 'signed_api' then 1 else 2 end, c.created_at desc limit 1), 'none');
+     order by case when c.method in ('plugin', 'api', 'app') then 0 else 1 end, c.created_at desc limit 1), 'none');
 $$;
 revoke all on function public.tracking_mode(uuid) from public, anon;
 grant execute on function public.tracking_mode(uuid) to authenticated;
@@ -41,62 +43,47 @@ $$;
 revoke all on function public.store_tracking_modes(uuid[]) from public, anon;
 grant execute on function public.store_tracking_modes(uuid[]) to authenticated;
 
-/* ---------- Create a custom-site (API) or manual connection ---------- */
-create or replace function public.create_platform_connection(p_org uuid, p_site_url text, p_kind text) returns json
+/* ---------- Custom site: key for the developer (signed API) ---------- */
+create or replace function public.create_api_connection(p_org uuid, p_site_url text) returns json
 language plpgsql security definer set search_path to '' as $$
-declare v_url text := public.normalize_url(p_site_url); v_id uuid; v_secret text := public.random_token(64);
-        v_platform text; v_method text; v_cur public.store_connections;
+declare v_url text := public.normalize_url(p_site_url); v_id uuid; v_secret text := public.random_token(64); v_cur public.store_connections;
 begin
   perform public.require_legal('store');
   if not public.is_admin(p_org) then raise exception 'forbidden' using errcode = '42501'; end if;
   if (select type from public.organizations where id = p_org) <> 'store' then raise exception 'not_a_store' using errcode = '22023'; end if;
   if v_url is null then raise exception 'invalid_url' using errcode = '22023'; end if;
-  if p_kind = 'custom' then v_platform := 'custom'; v_method := 'signed_api';
-  elsif p_kind = 'manual' then v_platform := 'manual'; v_method := 'manual';
-  else raise exception 'invalid_input' using errcode = '22023'; end if;
+  if (select count(*) from public.audit_events where org_id = p_org and action = 'store_connection.api_key_created'
+       and created_at > now() - interval '1 day') >= 20 then raise exception 'rate_limited' using errcode = '54000'; end if;
 
   select * into v_cur from public.store_connections where org_id = p_org and site_url = v_url for update;
-  -- Never take over a working automatic connection (e.g. a connected WooCommerce store).
+  -- Never take over a working plugin / REST / app connection (e.g. a connected WooCommerce store).
   if v_cur.id is not null and v_cur.status = 'connected' and v_cur.method in ('plugin', 'api', 'app') then
     raise exception 'already_connected' using errcode = '22023';
   end if;
 
+  -- Same address = same connection row, so orders, attributions and commissions stay attached when switching methods.
   insert into public.store_connections as sc (org_id, site_url, platform, method, status)
-  values (p_org, v_url, v_platform, v_method, case when p_kind = 'manual' then 'connected' else 'pending' end)
+  values (p_org, v_url, 'custom', 'signed_api', 'pending')
   on conflict (org_id, site_url) do update
-    set platform = excluded.platform, method = excluded.method,
-        status = case when p_kind = 'manual' then 'connected'
-                      when sc.status = 'connected' and sc.method = 'signed_api' then 'connected' else 'pending' end,
+    set platform = 'custom', method = 'signed_api',
+        status = case when sc.status = 'connected' and sc.method = 'signed_api' then 'connected' else 'pending' end,
         last_error = null, last_error_at = null
   returning sc.id into v_id;
+  -- A new key always replaces the previous one (rotation = immediate revocation of the old key).
+  insert into public.store_connection_secrets as s (connection_id, secret) values (v_id, v_secret)
+  on conflict (connection_id) do update set secret = excluded.secret, rotated_at = now();
 
-  if p_kind = 'custom' then
-    insert into public.store_connection_secrets as s (connection_id, secret) values (v_id, v_secret)
-    on conflict (connection_id) do update set secret = excluded.secret, rotated_at = now();
-  else
-    delete from public.store_connection_secrets where connection_id = v_id;   -- a manual connection takes no signed calls
-  end if;
-
-  -- Same activation rule as the plugin key (founders pricing clock starts at the first connection).
-  update public.organizations
-     set website_url = coalesce(website_url, v_url),
-         founders_until = coalesce(founders_until,
-           case when public.setting_bool('founders_open')
-                then now() + make_interval(months => public.setting_int('founders_months')) end)
-   where id = p_org;
-  if p_kind = 'manual' and v_cur.id is null then
-    insert into public.funnel_events(event, org_id) values ('store_connected', p_org);
-  end if;
+  update public.organizations set website_url = coalesce(website_url, v_url) where id = p_org;
   insert into public.audit_events(actor_user_id, org_id, action, target, details)
-  values (auth.uid(), p_org, 'store_connection.' || p_kind || '_created', v_id::text, jsonb_build_object('site', v_url));
-
-  return json_build_object('connection_id', v_id, 'site_url', v_url, 'kind', p_kind,
-    'connection_key', case when p_kind = 'custom' then 'lk_' || replace(v_id::text, '-', '') || '_' || v_secret end);
+  values (auth.uid(), p_org, 'store_connection.api_key_created', v_id::text, jsonb_build_object('site', v_url));
+  return json_build_object('connection_id', v_id, 'site_url', v_url,
+    'connection_key', 'lk_' || replace(v_id::text, '-', '') || '_' || v_secret);
 end $$;
-revoke all on function public.create_platform_connection(uuid, text, text) from public, anon;
-grant execute on function public.create_platform_connection(uuid, text, text) to authenticated;
+revoke all on function public.create_api_connection(uuid, text) from public, anon;
+grant execute on function public.create_api_connection(uuid, text) to authenticated;
 
--- A plugin key issued for the same address turns that connection back into a WooCommerce plugin connection.
+-- A plugin key issued for the same address turns that connection back into a WooCommerce plugin connection
+-- (same row: no order or commission data is lost; it is "connected" again only after the plugin reports).
 create or replace function public.create_store_connection(p_org uuid, p_site_url text) returns json
 language plpgsql security definer set search_path to '' as $$
 declare r json;
@@ -104,109 +91,63 @@ begin
   perform public.require_legal('store');
   r := public.create_store_connection_core(p_org, p_site_url);
   update public.store_connections set platform = 'woocommerce', method = 'plugin', status = 'pending'
-   where id = (r ->> 'connection_id')::uuid and platform in ('custom', 'manual');
+   where id = (r ->> 'connection_id')::uuid and platform = 'custom';
   return r;
 end $$;
 
-/* ---------- Manual coupon mode: the store reports sales per order ---------- */
-create or replace function public.manual_connection(p_org uuid) returns uuid
-language sql stable security definer set search_path to '' as $$
-  select id from public.store_connections where org_id = p_org and method = 'manual' and status = 'connected'
-   order by created_at desc limit 1;
-$$;
-revoke all on function public.manual_connection(uuid) from public, anon, authenticated;
-
--- Shared checks + the call into the normal order ingestion. p_order is the full normalized order.
-create or replace function public.manual_ingest(p_org uuid, p_order jsonb, p_action text) returns json
+/* ---------- Founders clock for new connection kinds: starts at the first real connection ---------- */
+-- Only fills founders_until when it is still empty, so stores that already have it (all WooCommerce stores today)
+-- are not affected.
+create or replace function public.connection_activation_trigger() returns trigger
 language plpgsql security definer set search_path to '' as $$
-declare v_conn uuid := public.manual_connection(p_org); r json;
 begin
-  if not public.is_admin(p_org) then raise exception 'forbidden' using errcode = '42501'; end if;
-  if v_conn is null then raise exception 'not_available' using errcode = '22023'; end if;
-  if (select count(*) from public.order_events where connection_id = v_conn and received_at > now() - interval '1 day') >= 500 then
-    raise exception 'rate_limited' using errcode = '54000';
+  if new.status = 'connected' and (tg_op = 'INSERT' or old.status is distinct from 'connected') then
+    update public.organizations
+       set founders_until = case when public.setting_bool('founders_open')
+                                 then now() + make_interval(months => public.setting_int('founders_months')) end
+     where id = new.org_id and founders_until is null and public.setting_bool('founders_open');
   end if;
-  r := public.ingest_order_event(v_conn, jsonb_build_object(
-         'event_id', 'manual:' || gen_random_uuid()::text, 'type', 'order.' || p_action,
-         'occurred_at', to_char(clock_timestamp() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
-         'reported_by', auth.uid(), 'source', 'manual', 'order', p_order));
-  insert into public.audit_events(actor_user_id, org_id, action, target, details)
-  values (auth.uid(), p_org, 'manual_sale.' || p_action, p_order ->> 'id', jsonb_build_object('result', r));
-  return r;
+  return new;
 end $$;
-revoke all on function public.manual_ingest(uuid, jsonb, text) from public, anon, authenticated;
+revoke all on function public.connection_activation_trigger() from public, anon, authenticated;
 
-create or replace function public.manual_report_order(p_org uuid, p_order_id text, p_order_date date, p_total_minor bigint,
-                                                      p_shipping_minor bigint, p_coupon text, p_currency text default 'ILS')
-returns json language plpgsql security definer set search_path to '' as $$
-declare v_id text := btrim(coalesce(p_order_id, '')); v_code text := upper(btrim(coalesce(p_coupon, '')));
-begin
-  if v_id !~ '^[A-Za-z0-9._#/-]{1,64}$' then raise exception 'invalid_input' using errcode = '22023'; end if;
-  if p_order_date is null or p_order_date > current_date or p_order_date < current_date - 400 then
-    raise exception 'invalid_dates' using errcode = '22023'; end if;
-  if p_total_minor is null or p_total_minor <= 0 or p_total_minor > 100000000 or coalesce(p_shipping_minor, 0) < 0
-     or coalesce(p_shipping_minor, 0) > p_total_minor then raise exception 'invalid_amount' using errcode = '22023'; end if;
-  if coalesce(p_currency, '') !~ '^[A-Z]{3}$' then raise exception 'invalid_input' using errcode = '22023'; end if;
-  -- Only this store's partner coupons: manual mode attributes by coupon, never by a tracking event.
-  if not exists (select 1 from public.partner_codes pc join public.agreements a on a.id = pc.agreement_id
-                  where lower(pc.code) = lower(v_code) and a.store_org_id = p_org) then
-    raise exception 'bad_code' using errcode = '22023';
-  end if;
-  if exists (select 1 from public.orders o where o.connection_id = public.manual_connection(p_org) and o.external_order_id = v_id) then
-    raise exception 'order_exists' using errcode = '22023';
-  end if;
-  return public.manual_ingest(p_org, jsonb_build_object(
-    'id', v_id, 'status', 'completed', 'currency', p_currency, 'total', p_total_minor, 'tax', 0,
-    'shipping', coalesce(p_shipping_minor, 0), 'shipping_tax', 0, 'coupons', jsonb_build_array(v_code),
-    'ref', '', 'email_hash', '',
-    -- An order reported for today is dated now; earlier days at midday (the agreement in force that day applies).
-    'created_at', case when p_order_date = current_date then to_char(clock_timestamp() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
-                       else p_order_date::text || 'T12:00:00Z' end,
-    'refunds', '[]'::jsonb), 'reported');
-end $$;
+create or replace trigger store_connections_activation after insert or update of status on public.store_connections
+  for each row execute function public.connection_activation_trigger();
 
--- Cancel or refund a reported order. Re-sends the last reported order with the change (amounts stay as reported).
-create or replace function public.manual_update_order(p_org uuid, p_order_id text, p_action text, p_amount_minor bigint default null)
-returns json language plpgsql security definer set search_path to '' as $$
-declare v_conn uuid := public.manual_connection(p_org); v_o jsonb; v_ord public.orders;
+/* ---------- No double commission when two connections of one store report the same sale ---------- */
+-- Same store, same order id, same total, created within 2 days, already attributed through another connection
+-- → the second attribution is skipped (the order is still recorded; a creator can open a claim if this was wrong).
+create or replace function public.attribution_dedupe_trigger() returns trigger
+language plpgsql security definer set search_path to '' as $$
+declare o public.orders;
 begin
-  if not public.is_admin(p_org) then raise exception 'forbidden' using errcode = '42501'; end if;
-  if p_action not in ('cancelled', 'refunded') then raise exception 'invalid_input' using errcode = '22023'; end if;
-  select * into v_ord from public.orders where connection_id = v_conn and external_order_id = btrim(coalesce(p_order_id, ''));
-  if not found then raise exception 'not_found' using errcode = 'P0002'; end if;
-  select payload -> 'order' into v_o from public.order_events
-   where connection_id = v_conn and external_order_id = v_ord.external_order_id order by occurred_at desc, received_at desc limit 1;
-  if p_action = 'cancelled' then
-    v_o := jsonb_set(v_o, '{status}', '"cancelled"');
-  else
-    if p_amount_minor is null or p_amount_minor <= 0 or p_amount_minor > v_ord.total_minor - v_ord.refunded_minor then
-      raise exception 'invalid_amount' using errcode = '22023'; end if;
-    v_o := jsonb_set(v_o, '{refunds}', coalesce(v_o -> 'refunds', '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
-             'id', 'r' || (jsonb_array_length(coalesce(v_o -> 'refunds', '[]'::jsonb)) + 1)::text, 'amount', p_amount_minor)));
+  select * into o from public.orders where id = new.order_id;
+  if exists (select 1 from public.orders o2 join public.attributions a2 on a2.order_id = o2.id
+              where o2.store_org_id = o.store_org_id and o2.connection_id <> o.connection_id
+                and o2.external_order_id = o.external_order_id and o2.total_minor = o.total_minor and o2.currency = o.currency
+                and abs(extract(epoch from o2.order_created_at - o.order_created_at)) < 172800) then
+    insert into public.audit_events(org_id, action, target, details)
+    values (o.store_org_id, 'attribution.duplicate_skipped', o.id::text,
+            jsonb_build_object('external_order_id', o.external_order_id, 'connection_id', o.connection_id));
+    return null;
   end if;
-  return public.manual_ingest(p_org, v_o, p_action);
+  return new;
 end $$;
+revoke all on function public.attribution_dedupe_trigger() from public, anon, authenticated;
 
--- The store's reported orders (newest first), with the commission each one created.
-create or replace function public.manual_orders(p_org uuid) returns json
-language plpgsql stable security definer set search_path to '' as $$
+create or replace trigger attributions_dedupe before insert on public.attributions
+  for each row execute function public.attribution_dedupe_trigger();
+-- The engine's "first attributed sale" funnel marker must not be written for a skipped attribution.
+create or replace function public.funnel_null_org_guard() returns trigger
+language plpgsql security definer set search_path to '' as $$
 begin
-  if not public.is_member(p_org) then raise exception 'forbidden' using errcode = '42501'; end if;
-  return coalesce((select json_agg(x order by x.order_created_at desc) from (
-    select o.external_order_id as id, o.order_created_at, o.status, o.total_minor, o.refunded_minor, o.currency,
-           o.coupon_codes[1] as coupon, cr.name as creator,
-           (select coalesce(sum(l.amount_minor), 0) from public.commission_ledger l
-             where l.attribution_id = a.id and l.party_role = 'creator') as commission_minor
-      from public.orders o
-      left join public.attributions a on a.order_id = o.id
-      left join public.organizations cr on cr.id = a.creator_org_id
-     where o.connection_id = public.manual_connection(p_org)
-     order by o.order_created_at desc limit 200) x), '[]');
+  if new.event = 'first_attributed_sale' and new.org_id is null then return null; end if;
+  return new;
 end $$;
-revoke all on function public.manual_report_order(uuid, text, date, bigint, bigint, text, text),
-  public.manual_update_order(uuid, text, text, bigint), public.manual_orders(uuid) from public, anon;
-grant execute on function public.manual_report_order(uuid, text, date, bigint, bigint, text, text),
-  public.manual_update_order(uuid, text, text, bigint), public.manual_orders(uuid) to authenticated;
+revoke all on function public.funnel_null_org_guard() from public, anon, authenticated;
+
+create or replace trigger funnel_events_null_org before insert on public.funnel_events
+  for each row execute function public.funnel_null_org_guard();
 
 /* ---------- Sale claims: missing or wrong sales (any connection type) ---------- */
 create table if not exists public.sale_claims (

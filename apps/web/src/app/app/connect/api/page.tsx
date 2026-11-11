@@ -6,7 +6,7 @@ import { LegalChecks, type PendingDoc } from "@/components/LegalChecks";
 import { loadApp } from "@/lib/orgs";
 import { errorText, shortDate } from "@/lib/format";
 import { getOrigin } from "@/lib/supabase/server";
-import { createPlatformConnection } from "../../actions";
+import { createApiConnection } from "../../actions";
 
 /** Custom site: the owner creates a key for the developer; the developer connects the site once (signed API). */
 export default async function ConnectApi({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
@@ -49,9 +49,8 @@ export default async function ConnectApi({ searchParams }: { searchParams: Promi
           </div>
         )}
 
-        <form action={createPlatformConnection} className="card stack">
+        <form action={createApiConnection} className="card stack">
           <input type="hidden" name="org" value={org.id} />
-          <input type="hidden" name="kind" value="custom" />
           <label className="field"><span>{a.site}</span>
             <input name="site" required dir="ltr" inputMode="url" placeholder="myshop.co.il" defaultValue={sp.site ?? c?.site_url ?? o?.website_url ?? ""} /></label>
           <LegalChecks docs={(pend ?? []) as PendingDoc[]} locale={locale} label={t.lc.store} />

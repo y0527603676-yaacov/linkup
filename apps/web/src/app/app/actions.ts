@@ -480,40 +480,17 @@ async function acceptStoreLegal(form: FormData, org: string, failTo: string) {
   if (error) redirect(`${failTo}&error=${errorCode(error)}`);
 }
 
-/** Owner chose "my developer connects the site" or "I report sales myself". */
-export async function createPlatformConnection(form: FormData) {
-  const org = str(form, "org"); const kind = str(form, "kind") === "manual" ? "manual" : "custom";
-  const page = kind === "manual" ? "/app/sales" : "/app/connect/api";
+/** Owner chose "my developer connects the site": a key for the signed API (custom sites). */
+export async function createApiConnection(form: FormData) {
+  const org = str(form, "org"); const page = "/app/connect/api";
   await acceptStoreLegal(form, org, `${page}?org=${org}`);
   const sb = await getSupabase();
-  const { data, error } = await sb.rpc("create_platform_connection", { p_org: org, p_site_url: str(form, "site"), p_kind: kind });
+  const { data, error } = await sb.rpc("create_api_connection", { p_org: org, p_site_url: str(form, "site") });
   if (error) redirect(back(page, org, { error: errorCode(error), site: str(form, "site") }));
-  const r = data as { connection_key: string | null };
-  if (kind === "custom" && r.connection_key) {
-    // The key is shown once: carried in a short-lived, http-only cookie (never in the address bar or logs).
-    (await cookies()).set("lk_api_key", r.connection_key, { httpOnly: true, sameSite: "lax", path: "/app/connect/api", maxAge: 300, secure: true });
-  }
+  const r = data as { connection_key: string };
+  // The key is shown once: carried in a short-lived, http-only cookie (never in the address bar or logs).
+  (await cookies()).set("lk_api_key", r.connection_key, { httpOnly: true, sameSite: "lax", path: "/app/connect/api", maxAge: 300, secure: true });
   redirect(back(page, org, { ok: "created" }));
-}
-
-export async function manualReport(form: FormData) {
-  const org = str(form, "org");
-  const sb = await getSupabase();
-  const { error } = await sb.rpc("manual_report_order", {
-    p_org: org, p_order_id: str(form, "order"), p_order_date: str(form, "date") || null,
-    p_total_minor: toMinor(str(form, "total")), p_shipping_minor: toMinor(str(form, "shipping") || "0"), p_coupon: str(form, "coupon"),
-  });
-  redirect(back("/app/sales", org, error ? { error: errorCode(error) } : { ok: "reported" }));
-}
-
-export async function manualUpdate(form: FormData) {
-  const org = str(form, "org"); const action = str(form, "action") === "refunded" ? "refunded" : "cancelled";
-  const sb = await getSupabase();
-  const { error } = await sb.rpc("manual_update_order", {
-    p_org: org, p_order_id: str(form, "order"), p_action: action,
-    p_amount_minor: action === "refunded" ? toMinor(str(form, "amount")) : null,
-  });
-  redirect(back("/app/sales", org, error ? { error: errorCode(error) } : { ok: action }));
 }
 
 export async function openSaleClaim(form: FormData) {
