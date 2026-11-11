@@ -19,6 +19,7 @@ export type Detection = {
   finalUrl: string;            // origin after redirects
   redirected: boolean;         // ended on a different host than typed
   linkupPlugin: boolean;       // LINKUP Connector's REST namespace is active
+  shopifyDomain?: string;      // xxx.myshopify.com when the storefront exposes it (needed for the Shopify app approval)
   wooRest: boolean;            // WooCommerce REST namespaces are present
   restBlocked: boolean;        // WordPress, but its REST API is not reachable publicly
   status?: number;
@@ -177,7 +178,9 @@ export async function detectStore(input: string, opts: { fetcher?: Fetcher; allo
   const r: Detection = { ...base, url, finalUrl, redirected, status: home.status };
   if (home.status >= 500 || home.status === 0) return { ...r, error: "http_error" };
   const cls = classifyHome(home);
+  const myshop = /([a-z0-9][a-z0-9-]{0,60}\.myshopify\.com)/i.exec(home.body.slice(0, MAX_BODY))?.[1]?.toLowerCase();
   r.platform = cls.platform;
+  if (cls.platform === "shopify" && myshop) r.shopifyDomain = myshop;
   // Even when the home page is unclear (blocked, 403, a JS-only page), a WordPress REST index is a reliable signal.
   if (cls.platform === "wordpress" || cls.platform === "woocommerce" || cls.platform === "unknown") {
     // `_fields=namespaces` keeps the answer tiny (a full REST index of a WooCommerce site is hundreds of KB).

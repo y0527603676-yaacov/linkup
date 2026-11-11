@@ -3,7 +3,10 @@ import { loadApp } from "@/lib/orgs";
 import { errorText, shortDate } from "@/lib/format";
 import { ConnectForm } from "./ConnectForm";
 import { LegalChecks, type PendingDoc } from "@/components/LegalChecks";
-import { startWooApi, syncWooApi, startWpConnect, disconnectStore, detectStoreAction } from "../actions";
+import { startWooApi, syncWooApi, startWpConnect, disconnectStore, detectStoreAction, startAppInstall } from "../actions";
+
+/** Platform apps are offered to stores only after a real end-to-end test (set per platform on the server). */
+const APP_ON = { shopify: process.env.LINKUP_SHOPIFY_APP === "1", wix: process.env.LINKUP_WIX_APP === "1" };
 import { PLUGIN_LISTED } from "@/lib/wp-connect";
 import { detectStore, probeWpAdmin } from "@/lib/store-detect";
 import { detectOpts } from "@/lib/detect-env";
@@ -92,6 +95,7 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
         <Alert text={errorText(sp.error, t)} />
         {sp.ok === "sync" && <Alert kind="ok" text={l.syncStarted} />}
         {sp.ok === "disconnected" && <Alert kind="ok" text={l.disconnect.ok} />}
+        {sp.ok === "app_connected" && <Alert kind="ok" text={u.app.connected} />}
         {wpResult === "connected" && <Alert kind="ok" text={w.done} />}
         {wpResult && wpResult !== "connected" && <Alert text={wpResult === "not_in_directory" ? `${w.errors.not_in_directory} ${w.uploadThen}` : (w.errors[wpResult] ?? w.errors.other)} />}
         {sp.wpr === "0" && <Alert text={w.notRevoked} />}
@@ -234,6 +238,23 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
                 <p style={{ margin: 0 }}>{f.wpNoWoo.d}</p>
                 <Retry again />
                 <Alternatives />
+              </>
+            ) : (platform === "shopify" && APP_ON.shopify) || (platform === "wix" && APP_ON.wix) ? (
+              <>
+                <p className="found" style={{ margin: 0 }}><span className="dot" /> <b>{u.app.found.replace("{p}", names[platform] ?? platform)}</b> · <span className="ltr">{dsite.replace(/^https?:\/\//, "")}</span></p>
+                <p style={{ margin: 0 }}>{u.app.lead.replace("{p}", names[platform] ?? platform)}</p>
+                <form action={startAppInstall} className="stack">
+                  <input type="hidden" name="org" value={org.id} />
+                  <input type="hidden" name="platform" value={platform} />
+                  <input type="hidden" name="site" value={dsite} />
+                  {platform === "shopify" && (d?.shopifyDomain
+                    ? <input type="hidden" name="shop" value={d.shopifyDomain} />
+                    : <label className="field"><span>{u.app.shopField}</span><input name="shop" required dir="ltr" placeholder="mystore.myshopify.com" />
+                        <small className="muted">{u.app.shopHint}</small></label>)}
+                  <LegalChecks docs={legal} locale={locale} label={t.lc.store} />
+                  <button className="btn btn-primary btn-block">{u.app.cta.replace("{p}", names[platform] ?? platform)}</button>
+                </form>
+                <Retry ghost label={f.otherSite} />
               </>
             ) : platform === "shopify" || platform === "wix" || platform === "magento" ? (
               <>

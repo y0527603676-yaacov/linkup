@@ -68,3 +68,11 @@ describe("no detection result can come from the address bar", () => {
     expect(body.indexOf("connectEligibility")).toBeLessThan(body.indexOf("create_store_connection"));
   });
 });
+
+describe("Shopify storefront → myshopify address for the app approval", () => {
+  it("is read from the storefront when present", async () => {
+    const shop: Fetcher = async (url) => ({ ...page(200, '<script>Shopify.shop = "demo-store.myshopify.com";</script><link href="//cdn.shopify.com/s/x.css">', { "x-shopid": "1" }), url });
+    const d = await (await import("../../src/lib/store-detect")).detectStore("demo-store.co.il", { fetcher: shop });
+    expect(d).toMatchObject({ ok: true, platform: "shopify", shopifyDomain: "demo-store.myshopify.com" });
+  });
+});

@@ -535,3 +535,23 @@ export async function adminCloseConnectHelp(form: FormData) {
   const { error } = await sb.rpc("close_connect_help", { p_id: str(form, "id"), p_status: "done" });
   redirect(back("/app/admin", org, error ? { error: errorCode(error), tab: "overview" } : { tab: "overview" }));
 }
+
+/* ---------- Platform apps (Shopify / Wix): the owner approves in the platform; everything after is automatic ---------- */
+export async function startAppInstall(form: FormData) {
+  const org = str(form, "org"); const platform = str(form, "platform") === "wix" ? "wix" : "shopify";
+  const on = platform === "shopify" ? process.env.LINKUP_SHOPIFY_APP === "1" : process.env.LINKUP_WIX_APP === "1";
+  const fail = (e: string) => redirect(back("/app/connect", org, { site: str(form, "site"), check: "1", error: e }));
+  if (!on) fail("not_available");
+  await acceptStoreLegal(form, org, `/app/connect?org=${org}&site=${encodeURIComponent(str(form, "site"))}&check=1`);
+  const shop = str(form, "shop").toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  const sb = await getSupabase();
+  const { data, error } = await sb.rpc("start_app_install", { p_org: org, p_platform: platform, p_shop: platform === "shopify" ? shop : null });
+  if (error) fail(errorCode(error));
+  const fnBase = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/apps`;
+  if (platform === "shopify") {
+    const q = new URLSearchParams({ client_id: process.env.SHOPIFY_API_KEY ?? "", scope: "read_orders,read_products,write_discounts",
+      redirect_uri: `${fnBase}/shopify/callback`, state: String(data) });
+    redirect(`https://${shop}/admin/oauth/authorize?${q}`);
+  }
+  redirect(`https://www.wix.com/installer/install?${new URLSearchParams({ appId: process.env.WIX_APP_ID ?? "", redirectUrl: `${fnBase}/wix/callback`, state: String(data) })}`);
+}
