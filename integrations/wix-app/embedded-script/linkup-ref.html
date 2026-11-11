@@ -3,23 +3,23 @@
      Wix loads it only after the visitor's consent where a consent banner applies.
      1. ?lku=CODE&lkt=<visit time> from a creator's personal link → kept in this browser (up to 90 days; the agreement's
         own window is enforced by LINKUP's server). Last click wins.
-     2. On Wix's standard "Purchase" event (thank-you page) it sends { instance, order id, ref } to LINKUP.
+     2. On Wix's standard "Purchase" event (thank-you page) it sends { instance, order id, signed ref } to LINKUP.
         LINKUP re-reads that order from Wix's API with the app's token; the browser never supplies amounts or status. -->
 <script>
 (function () {
   "use strict";
   var ENDPOINT = "{{endpoint}}", INSTANCE = "{{instance}}", KEY = "linkup_ref", MAX_AGE = 90 * 86400;
-  var RE = /^[A-Za-z0-9]{4,16}\|\d{9,11}$/;
+  var RE = /^[A-Za-z0-9]{4,16}\|\d{9,11}(\|[A-Za-z0-9_-]{22})?$/;
   function now() { return Math.floor(Date.now() / 1000); }
   function read() {
     var v = null; try { v = localStorage.getItem(KEY); } catch (e) {}
     if (!v || !RE.test(v) || now() - Number(v.split("|")[1]) > MAX_AGE) return null;
     return v;
   }
-  var p = new URLSearchParams(location.search), code = p.get("lku") || "", t = p.get("lkt") || "";
-  if (/^[A-Za-z0-9]{4,16}$/.test(code)) {
-    var ts = /^\d{9,11}$/.test(t) ? Number(t) : now(); if (ts > now() + 300) ts = now();
-    try { localStorage.setItem(KEY, code + "|" + ts); } catch (e) {}
+  // Only LINKUP's own signed visit (lku + lkt + lks from the /r/ redirect); LINKUP's server re-checks the signature.
+  var p = new URLSearchParams(location.search), code = p.get("lku") || "", t = p.get("lkt") || "", sig = p.get("lks") || "";
+  if (/^[A-Za-z0-9]{4,16}$/.test(code) && /^\d{9,11}$/.test(t) && Number(t) <= now() + 300) {
+    try { localStorage.setItem(KEY, code + "|" + t + (/^[A-Za-z0-9_-]{22}$/.test(sig) ? "|" + sig : "")); } catch (e) {}
   }
   var sent = {};
   function onEvent(name, data) {
@@ -28,11 +28,17 @@
     if (!ref || !/^[0-9a-f-]{36}$/i.test(order) || sent[order]) return;
     sent[order] = 1;
     var body = JSON.stringify({ instance: INSTANCE, order: order, ref: ref });
-    // text/plain keeps it a simple request (no CORS preflight); the server parses the JSON text.
-    var blob = new Blob([body], { type: "text/plain" });
-    if (!(navigator.sendBeacon && navigator.sendBeacon(ENDPOINT, blob))) {
-      fetch(ENDPOINT, { method: "POST", body: body, headers: { "Content-Type": "text/plain" }, keepalive: true }).catch(function () {});
-    }
+    // text/plain keeps it a simple request (no CORS preflight). If the order isn't readable yet (409) or the server is
+    // busy, retry a few times while the thank-you page is open.
+    var delays = [0, 3000, 10000, 30000];
+    (function attempt(i) {
+      if (i >= delays.length) return;
+      setTimeout(function () {
+        fetch(ENDPOINT, { method: "POST", body: body, headers: { "Content-Type": "text/plain" }, keepalive: true })
+          .then(function (r) { if (r.status === 409 || r.status >= 500) attempt(i + 1); })
+          .catch(function () { attempt(i + 1); });
+      }, delays[i]);
+    })(0);
   }
   function register() {
     try { window.wixDevelopersAnalytics.register("linkup", onEvent); return true; } catch (e) { return false; }

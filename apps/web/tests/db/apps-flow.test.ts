@@ -31,7 +31,7 @@ function fakeShopify(opts: { scope?: string; shopOk?: boolean } = {}) {
   const f: core.Fetch = async (url, init) => {
     const body = init?.body ? JSON.parse(init.body) : null; calls.push({ url, body });
     const res = (status: number, j: unknown) => ({ ok: status < 400, status, json: async () => j, text: async () => JSON.stringify(j) });
-    if (url.endsWith("/admin/oauth/access_token")) return body.code === "good" ? res(200, { access_token: "shpat_x", scope: opts.scope ?? "read_orders,read_products,write_discounts" }) : res(400, {});
+    if (url.endsWith("/admin/oauth/access_token")) return body.code === "good" ? res(200, { access_token: "shpat_x", scope: opts.scope ?? "read_orders,read_products,write_discounts,write_pixels,read_customer_events" }) : res(400, {});
     if (url.includes("/graphql.json")) {
       const qy: string = body.query;
       if (qy.includes("shop {")) return opts.shopOk === false ? res(401, {}) : res(200, { data: { shop: { myshopifyDomain: "demo.myshopify.com", primaryDomain: { url: "https://demo.co.il" }, currencyCode: "ILS" } } });
@@ -73,7 +73,7 @@ describe("Shopify: install with the owner's approval", () => {
     state = await call(u.store!, "start_app_install", { p_org: org.store, p_platform: "shopify", p_shop: "Demo.myshopify.com" });
     const link = core.shopifyInstallUrl(cfg, "demo.myshopify.com", state)!;
     expect(link).toContain("https://demo.myshopify.com/admin/oauth/authorize?");
-    expect(decodeURIComponent(link)).toContain("scope=read_orders,read_products,write_discounts");
+    expect(decodeURIComponent(link)).toContain("scope=read_orders,read_products,write_discounts,write_pixels,read_customer_events");
     expect(core.shopifyInstallUrl(cfg, "evil.com", state)).toBeNull();
   });
   it("a forged or tampered callback is refused and nothing is stored", async () => {

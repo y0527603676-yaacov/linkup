@@ -1,4 +1,4 @@
-/* LINKUP personal links for Shopify (theme app embed).
+/* LINKUP personal links for Shopify (theme app embed) — OPTIONAL extra next to the app pixel; not offered in the UI yet.
  * 1. A visitor arrives through a creator's personal link: ?lku=CODE&lkt=<visit time>.
  * 2. The ref "CODE|time" is written to the cart attribute "linkup_ref" (Shopify's Ajax Cart API). Shopify copies cart
  *    attributes to the order, so it reaches LINKUP in the order webhook — the order data itself always comes from Shopify.
@@ -8,7 +8,7 @@
  * Last click wins (a newer personal link replaces the older one). No personal data is read or sent. */
 (function () {
   "use strict";
-  var KEY = "linkup_ref", MAX_AGE = 90 * 86400, RE = /^[A-Za-z0-9]{4,16}\|\d{9,11}$/;
+  var KEY = "linkup_ref", MAX_AGE = 90 * 86400, RE = /^[A-Za-z0-9]{4,16}\|\d{9,11}(\|[A-Za-z0-9_-]{22})?$/;
   var script = document.currentScript;
   var root = (script && script.getAttribute("data-root")) || (window.Shopify && window.Shopify.routes && window.Shopify.routes.root) || "/";
   if (root.slice(-1) !== "/") root += "/";
@@ -33,11 +33,10 @@
     if (consentOk()) { try { localStorage.setItem(KEY, v); } catch (e) {} }
   }
   function fromUrl() {
-    var p = new URLSearchParams(location.search), code = p.get("lku") || "", t = p.get("lkt") || "";
-    if (!/^[A-Za-z0-9]{4,16}$/.test(code)) return null;
-    var ts = /^\d{9,11}$/.test(t) ? Number(t) : now();
-    if (ts > now() + 300) ts = now();
-    return code + "|" + ts;
+    // Only LINKUP's own signed visit (lku + lkt + lks from the /r/ redirect) — the server re-checks the signature.
+    var p = new URLSearchParams(location.search), code = p.get("lku") || "", t = p.get("lkt") || "", sig = p.get("lks") || "";
+    if (!/^[A-Za-z0-9]{4,16}$/.test(code) || !/^\d{9,11}$/.test(t) || Number(t) > now() + 300) return null;
+    return code + "|" + t + (/^[A-Za-z0-9_-]{22}$/.test(sig) ? "|" + sig : "");
   }
   var ref = fromUrl();
   if (ref) save(ref); else ref = read();

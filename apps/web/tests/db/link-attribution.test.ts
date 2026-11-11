@@ -2,7 +2,7 @@ import { createHmac } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createDb, createUser, type Db, type Who } from "./harness";
 import * as core from "../../../../supabase/functions/apps/core";
-import { partnerDestination } from "../../src/lib/partner-link";
+import { partnerDestination, signVisit } from "../../src/lib/partner-link";
 
 /**
  * Personal links (no coupon typing) on Shopify and Wix, plus scheduled sync, retries, late / out-of-order events.
@@ -27,7 +27,12 @@ const rpc: core.Rpc = async (fn, args = {}) => { try {
 const q = <T = any>(sql: string, p: unknown[] = []) => db.as<T>(owner, sql, p);
 const noSleep = async () => {};
 const cfg: core.Config = { shopifyKey: "key123", shopifySecret: "shpss_secret", wixAppId: "wix-app", wixSecret: "wix-secret",
-  functionsBase: "https://fn.example/functions/v1/apps", appBase: "https://app.example", cronSecret: "cron-s3cret", sleep: noSleep };
+  functionsBase: "https://fn.example/functions/v1/apps", appBase: "https://app.example", cronSecret: "cron-s3cret", sleep: noSleep,
+  refSecret: "ref-s3cret" };
+const SECRET = "ref-s3cret";
+/** What LINKUP's /r/ redirect produces: signed visit (raw ref) and landing query. */
+const sref = (c: string, at: number) => `${c}|${at}|${signVisit(SECRET, c, at)}`;
+const land = (c: string, at: number) => `/?lku=${c}&lkt=${at}&lks=${signVisit(SECRET, c, at)}&utm_source=linkup`;
 const attr = async (ext: string) => (await q(`select a.method, a.creator_org_id from attributions a join orders o on o.id = a.order_id where o.external_order_id = $1`, [ext]));
 const creatorTotal = async (ext: string) => Number((await q(`select coalesce(sum(l.amount_minor),0) n from commission_ledger l join attributions a on a.id = l.attribution_id
   join orders o on o.id = a.order_id where o.external_order_id = $1 and l.party_role = 'creator'`, [ext]))[0].n);
@@ -42,7 +47,7 @@ function fakeShopify() {
     fail429: 0, calls: [] as string[], products: [] as any[] };
   const f: core.Fetch = async (url, init) => {
     const body = init?.body ? JSON.parse(init.body) : null;
-    if (url.endsWith("/admin/oauth/access_token")) return res(200, { access_token: "shpat_x", scope: "read_orders,read_products,write_discounts" });
+    if (url.endsWith("/admin/oauth/access_token")) return res(200, { access_token: "shpat_x", scope: "read_orders,read_products,write_discounts,write_pixels,read_customer_events" });
     if (!url.includes("/graphql.json")) return res(404, {});
     const qy: string = body.query; st.calls.push(qy.slice(0, 40));
     if (st.fail429 > 0) { st.fail429--; return res(429, {}); }
@@ -92,31 +97,38 @@ beforeAll(async () => {
 }, 120_000);
 
 describe("Personal link → where the visitor lands", () => {
-  it("Shopify app store with a confirmed creator coupon: official shareable discount link, code applied automatically", async () => {
+  it("default: a plain personal link, no discount — signed visit (code + time) added for every platform", async () => {
     const r = await call(anon, "resolve_partner_link", { p_code: code });
-    expect(r).toMatchObject({ code, url: "https://linkshop.myshopify.com", platform: "shopify", discount_link: true });
-    const d = partnerDestination(r, 1_800_000_000)!;
-    expect(d.origin + d.pathname).toBe(`https://linkshop.myshopify.com/discount/${code}`);
-    const inner = new URL(d.searchParams.get("redirect")!, d.origin);
-    expect(inner.searchParams.get("lku")).toBe(code);
-    expect(inner.searchParams.get("lkt")).toBe("1800000000");
-    expect(core.refFromUrl(d.toString())).toEqual({ code, at: 1_800_000_000 });   // what Shopify records as the landing page
+    expect(r).toMatchObject({ code, url: "https://linkshop.myshopify.com", platform: "shopify", discount_link: false });
+    const d = partnerDestination(r, 1_790_000_000, SECRET)!;
+    expect(`${d.origin}${d.pathname}`).toBe("https://linkshop.myshopify.com/");
+    expect(d.searchParams.get("lku")).toBe(code);
+    expect(d.searchParams.get("lkt")).toBe("1790000000");
+    expect(d.searchParams.get("lks")).toBe(signVisit(SECRET, code, 1_790_000_000));
+    expect(core.refFromUrl(d.toString())).toEqual({ code, at: 1_790_000_000, sig: signVisit(SECRET, code, 1_790_000_000) });
+    expect(await core.signVisit(SECRET, code, 1_790_000_000)).toBe(signVisit(SECRET, code, 1_790_000_000));   // web app and edge agree
   });
-  it("switch off (setting) → plain store link with lku/lkt; other platforms are unchanged", async () => {
-    await q(`update app_settings set value = '0'::jsonb where key = 'shopify_discount_link'`);
+  it("only if the STORE chooses it: Shopify's official discount link that applies its creator coupon", async () => {
+    await expect(call(u.creator!, "set_link_options", { p_org: org.store, p_auto_apply_coupon: true })).rejects.toThrow(/forbidden/);
+    expect(await call(u.store!, "set_link_options", { p_org: org.store, p_auto_apply_coupon: true })).toEqual({ auto_apply_coupon: true });
+    const r = await call(anon, "resolve_partner_link", { p_code: code });
+    expect(r.discount_link).toBe(true);
+    const d = partnerDestination(r, 1_790_000_000, SECRET)!;
+    expect(d.origin + d.pathname).toBe(`https://linkshop.myshopify.com/discount/${code}`);
+    expect(core.refFromUrl(d.toString())?.code).toBe(code);
+    await q(`update app_settings set value = '0'::jsonb where key = 'shopify_discount_link'`);   // platform kill switch
     expect((await call(anon, "resolve_partner_link", { p_code: code })).discount_link).toBe(false);
     await q(`update app_settings set value = '1'::jsonb where key = 'shopify_discount_link'`);
+    expect(await call(u.store!, "set_link_options", { p_org: org.store, p_auto_apply_coupon: false })).toEqual({ auto_apply_coupon: false });
+    expect((await call(anon, "resolve_partner_link", { p_code: code })).discount_link).toBe(false);
+    expect(await call(u.store!, "link_options", { p_org: org.store })).toEqual({ auto_apply_coupon: false });
+  });
+  it("other platforms unchanged; unsafe addresses refused", async () => {
     const w = await call(anon, "resolve_partner_link", { p_code: otherCode });
     expect(w).toMatchObject({ url: "https://other-shop.co.il", discount_link: false });
-    const d = partnerDestination(w, 1_800_000_000)!;
-    expect(`${d.origin}${d.pathname}`).toBe("https://other-shop.co.il/");
-    expect(d.searchParams.get("lku")).toBe(otherCode);
-    expect(partnerDestination({ code: "x", url: "javascript:alert(1)" })).toBeNull();
+    expect(partnerDestination({ code: "abcd1234", url: "javascript:alert(1)" })).toBeNull();
   });
-  it("a coupon the shop doesn't confirm (or 0% discount) never produces a discount link", async () => {
-    await q(`update app_coupons set active = false where connection_id = $1`, [conn]);
-    expect((await call(anon, "resolve_partner_link", { p_code: code })).discount_link).toBe(false);
-    await q(`update app_coupons set active = true where connection_id = $1`, [conn]);
+  it("a coupon with 0% discount is never created in the shop", async () => {
     const out = await core.shopifySyncCoupons(shop.f, cfg, "linkshop.myshopify.com", "t", [{ code: "ZERO1234", discount_pct: 0, active: true }]);
     expect(out).toMatchObject({ created: 0, skipped: 1 });
   });
@@ -124,27 +136,33 @@ describe("Personal link → where the visitor lands", () => {
 
 describe("Shopify: sales through the personal link (no coupon typed)", () => {
   it("order whose landing page is the link → link attribution and commission; same webhook again counted once", async () => {
-    const landing = `/discount/${code}?redirect=%2F%3Flku%3D${code}%26lkt%3D${now() - 3600}%26utm_source%3Dlinkup`;
+    const landing = `/discount/${code}?redirect=${encodeURIComponent(land(code, now() - 3600))}`;
     expect((await send("orders/create", order(910001, { landing_site: landing }), "L1")).result.attributed).toBe(true);
     expect((await send("orders/create", order(910001, { landing_site: landing }), "L1")).result.status).toBe("duplicate");
     expect(await attr("910001")).toEqual([{ method: "link", creator_org_id: org.creator }]);
     expect(await creatorTotal("910001")).toBe(1_000);
   });
   it("cart attribute from the theme app embed → link attribution", async () => {
-    await send("orders/create", order(910002, { note_attributes: [{ name: "linkup_ref", value: `${code}|${now() - 60}` }] }), "L2");
+    await send("orders/create", order(910002, { note_attributes: [{ name: "linkup_ref", value: sref(code, now() - 60) }] }), "L2");
     expect((await attr("910002"))[0]?.method).toBe("link");
   });
   it("link AND coupon on the same order → exactly one attribution (coupon), no double commission", async () => {
-    await send("orders/create", order(910003, { discount_codes: [{ code }], landing_site: `/?lku=${code}&lkt=${now()}` }), "L3");
+    await send("orders/create", order(910003, { discount_codes: [{ code }], landing_site: land(code, now()) }), "L3");
     expect(await attr("910003")).toEqual([{ method: "coupon", creator_org_id: org.creator }]);
     expect(await creatorTotal("910003")).toBe(1_000);
   });
   it("visit older than the agreement's attribution window → no commission", async () => {
-    await send("orders/create", order(910004, { landing_site: `/?lku=${code}&lkt=${now() - 40 * 86400}` }), "L4");
+    await send("orders/create", order(910004, { landing_site: land(code, now() - 40 * 86400) }), "L4");
     expect(await attr("910004")).toEqual([]);
   });
+  it("forged or unsigned link data from the browser is ignored (no commission)", async () => {
+    await send("orders/create", order(910009, { landing_site: `/?lku=${code}&lkt=${now()}&lks=AAAAAAAAAAAAAAAAAAAAAA` }), "F1");
+    await send("orders/create", order(910010, { note_attributes: [{ name: "linkup_ref", value: `${code}|${now()}` }] }), "F2");
+    await send("orders/create", order(910011, { landing_site: land(code, now() + 86400) }), "F3");   // visit "in the future"
+    for (const id of ["910009", "910010", "910011"]) expect(await attr(id)).toEqual([]);
+  });
   it("another store's creator code on this store's order → ignored (stores are separated)", async () => {
-    await send("orders/create", order(910005, { landing_site: `/?lku=${otherCode}&lkt=${now()}` }), "L5");
+    await send("orders/create", order(910005, { landing_site: land(otherCode, now()) }), "L5");
     expect(await attr("910005")).toEqual([]);
   });
   it("no link data in the webhook → Shopify's customer journey; not ready yet → retried on the next order event", async () => {
@@ -152,27 +170,79 @@ describe("Shopify: sales through the personal link (no coupon typed)", () => {
     await send("orders/create", order(910006, { financial_status: "pending" }), "J1");
     expect(await attr("910006")).toEqual([]);
     const visit = new Date(Date.now() - 2 * 86400_000).toISOString();
-    shop.st.journey = { ready: true, lastVisit: { landingPage: `https://linkshop.co.il/products/x?lku=${code}&utm_source=linkup`, occurredAt: visit }, firstVisit: null };
+    shop.st.journey = { ready: true, lastVisit: { landingPage: `https://linkshop.co.il/products/x${land(code, Math.floor(Date.parse(visit) / 1000))}`, occurredAt: visit }, firstVisit: null };
     await send("orders/updated", order(910006, { updated_at: new Date(Date.now() + 1000).toISOString() }), "J2");
     expect((await attr("910006"))[0]?.method).toBe("link");
     expect((await q(`select ref_at from orders where external_order_id = '910006'`))[0].ref_at.toISOString().slice(0, 16)).toBe(visit.slice(0, 16));
   });
   it("events out of order: a late 'paid' event after the cancellation does not revive the commission", async () => {
     const t0 = Date.now();
-    await send("orders/cancelled", order(910007, { cancelled_at: new Date(t0 + 5000).toISOString(), updated_at: new Date(t0 + 5000).toISOString(), landing_site: `/?lku=${code}&lkt=${now()}` }), "O1");
-    await send("orders/create", order(910007, { updated_at: new Date(t0).toISOString(), landing_site: `/?lku=${code}&lkt=${now()}` }), "O2");
+    await send("orders/cancelled", order(910007, { cancelled_at: new Date(t0 + 5000).toISOString(), updated_at: new Date(t0 + 5000).toISOString(), landing_site: land(code, now()) }), "O1");
+    await send("orders/create", order(910007, { updated_at: new Date(t0).toISOString(), landing_site: land(code, now()) }), "O2");
     expect((await q(`select status from orders where external_order_id = '910007'`))[0].status).toBe("cancelled");
     expect(await creatorTotal("910007")).toBe(0);
   });
   it("refund of a link sale reduces the commission automatically", async () => {
     await send("orders/updated", order(910001, { financial_status: "partially_refunded", updated_at: new Date(Date.now() + 9000).toISOString(),
-      landing_site: `/?lku=${code}&lkt=${now()}`, refunds: [{ id: 77, transactions: [{ kind: "refund", status: "success", amount: "59.00" }] }] }), "L6");
+      landing_site: land(code, now()), refunds: [{ id: 77, transactions: [{ kind: "refund", status: "success", amount: "59.00" }] }] }), "L6");
     expect(await creatorTotal("910001")).toBe(500);
   });
   it("temporary database error → 500 so Shopify retries (nothing lost)", async () => {
     const broken: core.Rpc = async (fn, a) => (fn === "ingest_order_event" ? { data: null, error: { message: "connection reset" } } : rpc(fn, a));
     const h = hook("orders/create", order(910008), "E1");
     expect((await core.shopifyWebhook(broken, cfg, h.headers, h.raw, shop.f)).status).toBe(500);
+  });
+});
+
+describe("Shopify without any discount: LINKUP's app pixel (switched on by the app, no owner step)", () => {
+  const gqlOrder = (id: number, extra: object = {}) => ({ legacyResourceId: String(id), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    cancelledAt: null, currencyCode: "ILS", email: "buyer@example.com", displayFinancialStatus: "PAID", displayFulfillmentStatus: "UNFULFILLED",
+    discountCodes: [], totalPriceSet: { shopMoney: { amount: "118.00" } }, totalTaxSet: { shopMoney: { amount: "18.00" } },
+    totalShippingPriceSet: { shopMoney: { amount: "0" } }, shippingLines: { nodes: [] }, refunds: [], ...extra });
+  let current: any = null; const pixelCalls: string[] = [];
+  const pf: core.Fetch = async (url, init) => {
+    const body = init?.body ? JSON.parse(init.body) : null; const qy: string = body?.query ?? "";
+    if (qy.includes("order(id:")) return res(200, { data: { order: current } });
+    if (qy.includes("webPixelCreate")) { pixelCalls.push(body.variables.s); return res(200, { data: { webPixelCreate: { webPixel: { id: "gid://shopify/WebPixel/1" }, userErrors: [] } } }); }
+    return shop.f(url, init);
+  };
+  const claim = (b: object) => core.shopifyRef(rpc, pf, cfg, JSON.stringify(b));
+  it("activation: the app turns the pixel on itself, pointing at LINKUP with the shop's address", async () => {
+    expect(await core.shopifyEnsurePixel(pf, cfg, "linkshop.myshopify.com", "t")).toBe("created");
+    expect(JSON.parse(pixelCalls[0]!)).toEqual({ endpoint: "https://fn.example/functions/v1/apps/shopify/ref", shop: "linkshop.myshopify.com" });
+    expect(core.SHOPIFY_SCOPES).toEqual(expect.arrayContaining(["write_pixels", "read_customer_events"]));
+  });
+  it("purchase 20 days after the click (window 30) → link attribution; amounts come from Shopify, not the browser", async () => {
+    current = gqlOrder(930001);
+    const r = await claim({ shop: "linkshop.myshopify.com", order: "gid://shopify/Order/930001", ref: sref(code, now() - 20 * 86400), total: "99999" });
+    expect((r.body as any).result.attributed).toBe(true);
+    expect(await attr("930001")).toEqual([{ method: "link", creator_org_id: org.creator }]);
+    expect(await creatorTotal("930001")).toBe(1_000);
+    // the order webhook arriving afterwards changes nothing (same order, one attribution)
+    await send("orders/paid", order(930001, { updated_at: new Date(Date.now() + 1000).toISOString() }), "P1");
+    expect(await creatorTotal("930001")).toBe(1_000);
+  });
+  it("click 40 days before the purchase (window 30) → no commission; the business window is what decides", async () => {
+    current = gqlOrder(930002);
+    await claim({ shop: "linkshop.myshopify.com", order: "930002", ref: sref(code, now() - 40 * 86400) });
+    expect(await attr("930002")).toEqual([]);
+  });
+  it("unsigned / forged ref → ignored; order not readable yet → 409 so the pixel retries", async () => {
+    current = gqlOrder(930003);
+    expect((await claim({ shop: "linkshop.myshopify.com", order: "930003", ref: `${code}|${now()}` })).body).toMatchObject({ ignored: "untrusted_ref" });
+    current = null;
+    expect((await claim({ shop: "linkshop.myshopify.com", order: "930004", ref: sref(code, now()) })).status).toBe(409);
+    expect((await claim({ shop: "evil.com", order: "1", ref: sref(code, now()) })).status).toBe(400);
+  });
+  it("pixel first, webhook later; webhook first, pixel later — same single attribution either way", async () => {
+    await send("orders/create", order(930005, { financial_status: "pending" }), "P2");   // no link data in the order
+    current = gqlOrder(930005);
+    await claim({ shop: "linkshop.myshopify.com", order: "930005", ref: sref(code, now() - 3600) });
+    expect(await attr("930005")).toEqual([{ method: "link", creator_org_id: org.creator }]);
+  });
+  it("an order claimed long after it was placed is refused (claim time ≠ attribution window)", async () => {
+    current = gqlOrder(930006, { createdAt: new Date(Date.now() - 100 * 3600_000).toISOString() });
+    expect((await claim({ shop: "linkshop.myshopify.com", order: "930006", ref: sref(code, now() - 120 * 3600) })).body).toMatchObject({ ignored: "claim_too_late" });
   });
 });
 
@@ -216,7 +286,7 @@ describe("Wix: personal link through the embedded script beacon", () => {
     if (url.endsWith("/coupons/query")) return res(200, { coupons: [] });
     if (url.endsWith("/stores/v2/coupons")) return res(200, { id: "cpn-1" });
     if (url.endsWith("/products/query")) return res(200, { products: [] });
-    if (url.includes("/ecom/v1/orders/")) return url.endsWith(orderGuid) && wixOrderObj ? res(200, { order: wixOrderObj }) : res(404, {});
+    if (url.includes("/ecom/v1/orders/")) return wixOrderObj && url.endsWith(wixOrderObj.id) ? res(200, { order: wixOrderObj }) : res(404, {});
     return res(404, {});
   };
   const beacon = (b: object) => core.wixRef(rpc, wixFetch, cfg, JSON.stringify(b));
@@ -233,13 +303,14 @@ describe("Wix: personal link through the embedded script beacon", () => {
   it("malformed beacons are refused; unknown orders ignored", async () => {
     expect((await beacon({ instance, order: "1; drop", ref: `${wcode}|${now()}` })).status).toBe(400);
     expect((await beacon({ instance, order: orderGuid, ref: "nope" })).status).toBe(400);
-    expect((await beacon({ instance, order: orderGuid, ref: `${wcode}|${now()}` })).body).toMatchObject({ ignored: "unknown_order" });
+    expect((await beacon({ instance, order: orderGuid, ref: sref(wcode, now()) })).status).toBe(409);   // order not readable yet → script retries
+    expect((await beacon({ instance, order: orderGuid, ref: `${wcode}|${now()}` })).body).toMatchObject({ ignored: "untrusted_ref" });
   });
   it("beacon → the order is read from Wix's API (not from the browser) → link attribution; replay counted once", async () => {
     wixOrderObj = wOrder({ priceSummary: { total: { amount: "999" }, tax: { amount: "0" } } });
     wixOrderObj.priceSummary = { total: { amount: "118" }, tax: { amount: "18" } };   // the browser can't change amounts
-    expect((await beacon({ instance, order: orderGuid, ref: `${wcode}|${now() - 100}` })).body).toMatchObject({ ok: true });
-    await beacon({ instance, order: orderGuid, ref: `${wcode}|${now() - 100}` });
+    expect((await beacon({ instance, order: orderGuid, ref: sref(wcode, now() - 100) })).body).toMatchObject({ ok: true });
+    await beacon({ instance, order: orderGuid, ref: sref(wcode, now() - 100) });
     expect(await attr("5001")).toEqual([{ method: "link", creator_org_id: org.creator }]);
     expect(await creatorTotal("5001")).toBe(1_000);
   });
@@ -257,8 +328,18 @@ describe("Wix: personal link through the embedded script beacon", () => {
       data: JSON.stringify({ actionEvent: { body: { order: o } } }) }) }));
     expect(await creatorTotal("5001")).toBe(500);
   });
-  it("old orders can't be claimed later through the beacon", async () => {
-    wixOrderObj = wOrder({ id: orderGuid, number: "5002", createdDate: new Date(Date.now() - 5 * 3600_000).toISOString() });
-    expect((await beacon({ instance, order: orderGuid, ref: `${wcode}|${now()}` })).body).toMatchObject({ ignored: "not_recent" });
+  it("no 2-hour limit any more: purchase 25 days after the click, beacon 5 hours after the order → credited", async () => {
+    // (the agreement must already have existed when the order was placed)
+    // (test setup only: agreement history is append-only, so the guard is bypassed for this backdating)
+    await q(`set session_replication_role = replica`);
+    await q(`update agreement_versions set effective_from = now() - interval '60 days' where agreement_id = (select agreement_id from partner_codes where code = $1)`, [wcode]);
+    await q(`set session_replication_role = origin`);
+    wixOrderObj = wOrder({ id: "aaaaaaaa-bbbb-4ccc-8ddd-000000005003", number: "5003", createdDate: new Date(Date.now() - 5 * 3600_000).toISOString() });
+    const rb = (await beacon({ instance, order: wixOrderObj.id, ref: sref(wcode, now() - 25 * 86400) })).body as any;
+    expect(rb.result.attributed).toBe(true);
+  });
+  it("claim time is separate from the attribution window: an order placed 100 hours ago can't be claimed now", async () => {
+    wixOrderObj = wOrder({ id: "aaaaaaaa-bbbb-4ccc-8ddd-000000005002", number: "5002", createdDate: new Date(Date.now() - 100 * 3600_000).toISOString() });
+    expect((await beacon({ instance, order: wixOrderObj.id, ref: sref(wcode, now() - 101 * 3600) })).body).toMatchObject({ ignored: "claim_too_late" });
   });
 });

@@ -1,0 +1,25 @@
+# LINKUP app pixel (Shopify Web Pixels API). Switched on by LINKUP itself after install (webPixelCreate) — the store
+# owner does nothing. Shopify loads it only when the visitor allows marketing (and analytics) under the store's
+# consent settings, and not for visitors who opted out of data sale.
+type = "web_pixel_extension"
+name = "linkup-pixel"
+runtime_context = "strict"
+
+[customer_privacy]
+analytics = true
+marketing = true
+preferences = false
+sale_of_data = "enabled"
+
+[settings]
+type = "object"
+
+[settings.fields.endpoint]
+name = "LINKUP endpoint"
+description = "Where purchase events are sent"
+type = "single_line_text_field"
+
+[settings.fields.shop]
+name = "Shop"
+description = "myshopify domain"
+type = "single_line_text_field"

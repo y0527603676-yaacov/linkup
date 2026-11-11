@@ -361,8 +361,6 @@ export const en: Dict = {
       found: "We found a {p} store", lead: "Approve the connection once in {p}; from then on LINKUP receives orders, cancellations and refunds automatically and creates the creators' coupons in your store.",
       cta: "Approve the connection in {p}", shopField: "Your myshopify address", shopHint: "Shown in Shopify admin → Settings → Domains, e.g. mystore.myshopify.com",
       connected: "Store connected and verified. Orders now update automatically.",
-      embed: "Recommended: one click in Shopify turns LINKUP on in your theme, so purchases through a personal link are recognized even when the customer comes back later. In the window that opens, click “Save”.",
-      embedCta: "Turn on in theme",
     },
     help: {
       cta: "Ask for help connecting", next: "Next", title: "Help connecting your store", lead: "We'll call you back and connect the store together, by phone or screen share. Leave a phone number and choose what suits you.",

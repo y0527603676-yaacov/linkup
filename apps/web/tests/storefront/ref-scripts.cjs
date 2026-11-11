@@ -44,23 +44,24 @@ async function shopify(browser, device, consent) {
 async function wix(browser, device) {
   const ctx = await browser.newContext(device ? { ...devices[device] } : {});
   const beacons = [];
-  await ctx.route("https://fn.test/**", async (route) => { beacons.push(route.request().postData()); return route.fulfill({ status: 200, body: "{}" }); });
+  // First answer 409 (order not readable yet) → the script must retry; then 200.
+  await ctx.route("https://fn.test/**", async (route) => { beacons.push(route.request().postData()); return route.fulfill({ status: beacons.length === 1 ? 409 : 200, body: "{}" }); });
   await ctx.route("https://wix-shop.test/**", async (route) => route.fulfill({ contentType: "text/html", body:
     `<!doctype html><meta name=viewport content="width=device-width"><body><h1>wix</h1>
      <script>window.wixDevelopersAnalytics={_h:[],register:function(n,cb){this._h.push(cb);},fire:function(e,d){this._h.forEach(function(h){h(e,d);});}};</script>
      ${wixHtml}</body>` }));
   const page = await ctx.newPage(); const label = `[wix ${device ?? "desktop"}]`;
-  await page.goto(`https://wix-shop.test/?lku=NOA12345&lkt=${T1}`);
+  await page.goto(`https://wix-shop.test/?lku=NOA12345&lkt=${T1}&lks=abcdefghijklmnopqrstuv`);
   await page.goto("https://wix-shop.test/product-page/mug");
   await page.goto("https://wix-shop.test/thank-you-page/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
   await page.evaluate(() => { window.wixDevelopersAnalytics.fire("AddToCart", { id: "p1" }); });
   await page.evaluate(() => { window.wixDevelopersAnalytics.fire("Purchase", { orderId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", revenue: "118" }); });
   await page.evaluate(() => { window.wixDevelopersAnalytics.fire("Purchase", { orderId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", revenue: "118" }); });
-  await page.waitForTimeout(500);
-  ok(beacons.length === 1, `${label} one beacon per order (other events ignored)`);
+  await page.waitForTimeout(4500);
+  ok(beacons.length === 2 && beacons[0] === beacons[1], `${label} one purchase → one report, retried once after "order not ready" (other events ignored)`);
   const b = beacons[0] ? JSON.parse(beacons[0]) : {};
-  ok(b.ref === `NOA12345|${T1}` && b.order === "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee" && b.instance === "1a2b3c4d-1111-4222-8333-944455556666" && Object.keys(b).length === 3,
-     `${label} beacon carries only instance, order id and ref (no amounts, no personal data)`);
+  ok(b.ref === `NOA12345|${T1}|abcdefghijklmnopqrstuv` && b.order === "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee" && b.instance === "1a2b3c4d-1111-4222-8333-944455556666" && Object.keys(b).length === 3,
+     `${label} beacon carries only instance, order id and ref (signed visit; no amounts, no personal data)`);
   await ctx.close();
 }
 

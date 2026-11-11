@@ -30,10 +30,6 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
   const site = c?.site_url ?? o?.website_url ?? "";
   const api = apiOpen === true;
   const connected = c?.status === "connected";
-  // Shopify app: one optional click turns on LINKUP's theme app embed (personal links survive a new cart / later visit).
-  const shopHost = c?.method === "app" && c.platform === "shopify" ? (c.site_url.match(/^https:\/\/([a-z0-9-]+\.myshopify\.com)$/)?.[1] ?? null) : null;
-  const embedLink = APP_ON.shopify && connected && shopHost && process.env.SHOPIFY_API_KEY
-    ? `https://${shopHost}/admin/themes/current/editor?context=apps&template=index&activateAppId=${encodeURIComponent(process.env.SHOPIFY_API_KEY)}/linkup-ref` : null;
   const wpAvail = wpOpen === true;
   const w = l.wp;
   const f = l.flow;
@@ -100,12 +96,6 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
         {sp.ok === "sync" && <Alert kind="ok" text={l.syncStarted} />}
         {sp.ok === "disconnected" && <Alert kind="ok" text={l.disconnect.ok} />}
         {sp.ok === "app_connected" && <Alert kind="ok" text={u.app.connected} />}
-        {embedLink && (
-          <div className="card card-flat stack" style={{ marginBottom: 16, gap: 8 }} data-testid="shopify-embed">
-            <p style={{ margin: 0 }}>{u.app.embed}</p>
-            <a className="btn btn-primary" href={embedLink} target="_blank" rel="noopener noreferrer">{u.app.embedCta}</a>
-          </div>
-        )}
         {wpResult === "connected" && <Alert kind="ok" text={w.done} />}
         {wpResult && wpResult !== "connected" && <Alert text={wpResult === "not_in_directory" ? `${w.errors.not_in_directory} ${w.uploadThen}` : (w.errors[wpResult] ?? w.errors.other)} />}
         {sp.wpr === "0" && <Alert text={w.notRevoked} />}

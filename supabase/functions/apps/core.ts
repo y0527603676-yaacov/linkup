@@ -19,11 +19,13 @@ export type Config = {
   functionsBase: string;   // https://<project>.supabase.co/functions/v1/apps
   appBase: string;         // https://linkup… (where the owner returns)
   cronSecret?: string;     // protects the periodic sync route
+  refSecret?: string;      // signs personal-link visits (same value as LINKUP_REF_SECRET in the web app)
+  claimHours?: number;     // how long after the order a storefront purchase event may still be linked to it (default 72)
   sleep?: (ms: number) => Promise<void>;   // injectable for tests
 };
 export type Reply = { status: number; body?: unknown; redirect?: string };
 
-export const SHOPIFY_SCOPES = ["read_orders", "read_products", "write_discounts"];
+export const SHOPIFY_SCOPES = ["read_orders", "read_products", "write_discounts", "write_pixels", "read_customer_events"];
 export const SHOPIFY_TOPICS = ["ORDERS_CREATE", "ORDERS_UPDATED", "ORDERS_CANCELLED", "APP_UNINSTALLED"];
 const SHOP_RE = /^[a-z0-9][a-z0-9-]{0,60}\.myshopify\.com$/;
 const enc = new TextEncoder();
@@ -86,19 +88,38 @@ export function retrying(fetchFn: Fetch, sleep: (ms: number) => Promise<void> = 
   };
 }
 
-/* ---------- personal link → ref ("CODE|unix time of the visit") ---------- */
+/* ---------- personal link → ref ----------
+ * The /r/CODE redirect adds lku=CODE, lkt=<visit time> and lks=<LINKUP signature of CODE|time>. Storefront scripts keep
+ * "CODE|time|sig". The server accepts a link ref only with a valid signature (when LINKUP_REF_SECRET is set), so a
+ * browser cannot invent a creator code or a visit time; the engine receives "CODE|time" and applies the agreement's
+ * attribution window and all other rules. Three separate times:
+ *   - attribution window: per agreement (1–90 days), enforced in the database from the signed visit time;
+ *   - storage of the ref in the visitor's browser: up to 90 days (the longest window LINKUP allows), consent permitting;
+ *   - claim time: how long after an order a storefront purchase event may still be linked to it (claimHours). */
 const CODE_RE = /^[A-Za-z0-9]{4,16}$/;
 export const REF_RE = /^[A-Za-z0-9]{4,16}\|\d{9,11}$/;
-/** Reads LINKUP's link parameters (lku = creator code, lkt = visit time) from a landing URL, also when URL-encoded
- *  (e.g. inside Shopify's /discount/CODE?redirect=… landing page). */
-export function refFromUrl(u: unknown): { code: string; at: number | null } | null {
+export const RAW_REF_RE = /^[A-Za-z0-9]{4,16}\|\d{9,11}(\|[A-Za-z0-9_-]{22})?$/;
+/** Reads lku / lkt / lks from a landing URL, also when URL-encoded (e.g. inside /discount/CODE?redirect=…). */
+export function refFromUrl(u: unknown): { code: string; at: number | null; sig: string | null } | null {
   let s = String(u ?? ""); if (!s || s.length > 4000) return null;
   for (let i = 0; i < 3; i++) { try { const d = decodeURIComponent(s.replace(/\+/g, " ")); if (d === s) break; s = d; } catch { break; } }
   const m = s.match(/[?&]lku=([A-Za-z0-9]{4,16})(?![A-Za-z0-9])/); if (!m) return null;
-  const t = s.match(/[?&]lkt=(\d{9,11})(?!\d)/);
-  return { code: m[1]!, at: t ? Number(t[1]) : null };
+  const t = s.match(/[?&]lkt=(\d{9,11})(?!\d)/); const g = s.match(/[?&]lks=([A-Za-z0-9_-]{22})(?![A-Za-z0-9_-])/);
+  return { code: m[1]!, at: t ? Number(t[1]) : null, sig: g ? g[1]! : null };
 }
-const refString = (code: string, at: number | null) => (CODE_RE.test(code) && at && at > 1e9 ? `${code}|${Math.floor(at)}` : "");
+const rawFrom = (code: string, at: number | null, sig: string | null) =>
+  CODE_RE.test(code) && at && at > 1e9 ? `${code}|${Math.floor(at)}${sig ? `|${sig}` : ""}` : "";
+const b64url = (b: Uint8Array) => b64(b).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+/** Signature LINKUP's redirect puts on a visit: base64url of the first 16 bytes of HMAC-SHA256(secret, "CODE|time"). */
+export async function signVisit(secret: string, code: string, at: number) { return b64url((await hmac(secret, `${code}|${at}`)).slice(0, 16)); }
+/** "CODE|time|sig" (or "CODE|time" when signing is not configured) → "CODE|time" for the engine, or "" if not trusted. */
+export async function acceptRef(cfg: Config, raw: string): Promise<string> {
+  if (!RAW_REF_RE.test(raw)) return "";
+  const [code, at, sig] = raw.split("|") as [string, string, string | undefined];
+  if (Number(at) > Date.now() / 1000 + 300) return "";
+  if (cfg.refSecret) { if (!sig || !same(await signVisit(cfg.refSecret, code, Number(at)), sig)) return ""; }
+  return `${code}|${at}`;
+}
 
 export type NormalizedOrder = { id: string; status: string; currency: string; total: number; tax: number; shipping: number; shipping_tax: number;
   coupons: string[]; ref: string; email_hash: string; created_at: string; refunds: { id: string; amount: number }[] };
@@ -111,7 +132,8 @@ export function shopifyOrder(o: any, emailHash = ""): NormalizedOrder | null {
   // 1) cart attribute set by the LINKUP theme app embed, 2) the landing page Shopify recorded for the order.
   const attr = String((o.note_attributes ?? []).find((a: any) => a?.name === "linkup_ref")?.value ?? "");
   const land = refFromUrl(o.landing_site);
-  const ref = REF_RE.test(attr) ? attr : land ? refString(land.code, land.at) : "";
+  // Raw (possibly signed) — the webhook verifies it with acceptRef before ingestion.
+  const ref = RAW_REF_RE.test(attr) ? attr : land ? rawFrom(land.code, land.at, land.sig) : "";
   return {
     id: String(o.id), status, currency: cur, total: toMinor(o.total_price, cur), tax: toMinor(o.total_tax, cur),
     shipping: toMinor(o.total_shipping_price_set?.shop_money?.amount, cur),
@@ -218,6 +240,7 @@ export async function shopifyActivate(rpc: Rpc, fetchFn: Fetch, cfg: Config, con
       `mutation($topic: WebhookSubscriptionTopic!, $url: URL!) { webhookSubscriptionCreate(topic: $topic, webhookSubscription: { callbackUrl: $url, format: JSON }) { userErrors { message } } }`,
       { topic, url: `${cfg.functionsBase}/shopify/webhook` });
   }
+  await shopifyEnsurePixel(fetchFn, cfg, c.shop, c.token);
   const r = await shopifyVerifyAndSync(rpc, fetchFn, cfg, conn, true);
   return r.ok;
 }
@@ -285,15 +308,93 @@ export async function shopifySyncProducts(rpc: Rpc, fetchFn: Fetch, cfg: Config,
 /** Shopify's own attribution of the order (official customerJourneySummary): last visit first, then first visit.
  *  Used only when the order has no LINKUP coupon and no link data in the webhook. Returns "" while not ready. */
 export async function shopifyJourneyRef(fetchFn: Fetch, cfg: Config, shop: string, token: string, orderId: string): Promise<string> {
+  // Returns a raw ref; the caller verifies it (acceptRef).
   const j = await gqlJson(fetchFn, cfg, shop, token, `query($id: ID!) { order(id: $id) { customerJourneySummary { ready
     lastVisit { landingPage occurredAt } firstVisit { landingPage occurredAt } } } }`, { id: `gid://shopify/Order/${orderId}` });
   const s = j?.data?.order?.customerJourneySummary; if (!s?.ready) return "";
   for (const v of [s.lastVisit, s.firstVisit]) {
     const r = refFromUrl(v?.landingPage); if (!r) continue;
-    const at = r.at ?? (v?.occurredAt ? Math.floor(Date.parse(v.occurredAt) / 1000) : null);
-    const ref = refString(r.code, at); if (ref) return ref;
+    // Signed links carry their own visit time; an unsigned landing page counts only when signing is not configured.
+    const ref = r.at && r.sig ? rawFrom(r.code, r.at, r.sig)
+      : cfg.refSecret ? "" : rawFrom(r.code, r.at ?? (v?.occurredAt ? Math.floor(Date.parse(v.occurredAt) / 1000) : null), null);
+    if (ref) return ref;
   }
   return "";
+}
+
+/** Personal links without any discount: LINKUP's app pixel (Shopify Web Pixels API) is switched on by the app itself
+ *  (webPixelCreate) — no step for the owner. Shopify loads it only with the visitor's consent (customer_privacy in the
+ *  extension). It keeps the signed ref and, on Shopify's checkout_completed event, sends { shop, order id, ref }. */
+export async function shopifyEnsurePixel(fetchFn: Fetch, cfg: Config, shop: string, token: string) {
+  const settings = JSON.stringify({ endpoint: `${cfg.functionsBase}/shopify/ref`, shop });
+  const j = await gqlJson(fetchFn, cfg, shop, token,
+    `mutation($s: JSON!) { webPixelCreate(webPixel: { settings: $s }) { webPixel { id } userErrors { code message } } }`, { s: settings });
+  const res = j?.data?.webPixelCreate;
+  if (res?.webPixel?.id) return "created";
+  if ((res?.userErrors ?? []).some((e: any) => /TAKEN|exist/i.test(`${e.code} ${e.message}`))) {   // already there: refresh its settings
+    const cur = await gqlJson(fetchFn, cfg, shop, token, "{ webPixel { id } }");
+    const id = cur?.data?.webPixel?.id;
+    if (id) { await gql(fetchFn, cfg, shop, token, `mutation($id: ID!, $s: JSON!) { webPixelUpdate(id: $id, webPixel: { settings: $s }) { userErrors { message } } }`, { id, s: settings }); return "updated"; }
+  }
+  return "failed";
+}
+
+const SHOP_ORDER_QUERY = `query($id: ID!) { order(id: $id) { legacyResourceId createdAt updatedAt cancelledAt currencyCode email
+  displayFinancialStatus displayFulfillmentStatus discountCodes
+  totalPriceSet { shopMoney { amount } } totalTaxSet { shopMoney { amount } } totalShippingPriceSet { shopMoney { amount } }
+  shippingLines(first: 20) { nodes { taxLines { priceSet { shopMoney { amount } } } } }
+  refunds { id totalRefundedSet { shopMoney { amount } } } } }`;
+/** Admin GraphQL order → the same normalized format as the order webhook (same ids for the order and its refunds). */
+export function shopifyGqlOrder(o: any, emailHash = ""): NormalizedOrder | null {
+  if (!o?.legacyResourceId || !o.currencyCode) return null;
+  const cur = String(o.currencyCode).toUpperCase(); const fs = String(o.displayFinancialStatus ?? "").toLowerCase();
+  const status = o.cancelledAt || fs === "voided" ? "cancelled" : fs === "refunded" ? "refunded"
+    : ["paid", "partially_refunded"].includes(fs) ? (o.displayFulfillmentStatus === "FULFILLED" ? "completed" : "processing") : "pending";
+  return {
+    id: String(o.legacyResourceId), status, currency: cur, total: toMinor(o.totalPriceSet?.shopMoney?.amount, cur),
+    tax: toMinor(o.totalTaxSet?.shopMoney?.amount, cur), shipping: toMinor(o.totalShippingPriceSet?.shopMoney?.amount, cur),
+    shipping_tax: (o.shippingLines?.nodes ?? []).flatMap((l: any) => l.taxLines ?? []).reduce((s: number, t: any) => s + toMinor(t.priceSet?.shopMoney?.amount, cur), 0),
+    coupons: (o.discountCodes ?? []).map(String).filter(Boolean), ref: "", email_hash: emailHash, created_at: o.createdAt,
+    refunds: (o.refunds ?? []).map((r: any) => ({ id: String(r.id).split("/").pop()!, amount: toMinor(r.totalRefundedSet?.shopMoney?.amount, cur) }))
+      .filter((r: { amount: number }) => r.amount > 0),
+  };
+}
+
+/** Purchase event from LINKUP's Shopify pixel. The browser is trusted only for the signed ref; the order is read from
+ *  Shopify's Admin API with the app token and goes through the same engine (coupon wins, one attribution per order,
+ *  attribution window from the signed visit time, commission only once paid). */
+export async function shopifyRef(rpc: Rpc, fetchRaw: Fetch, cfg: Config, raw: string): Promise<Reply> {
+  let b: any; try { b = JSON.parse(raw); } catch { return { status: 400, body: { error: "invalid_json" } }; }
+  const shop = String(b?.shop ?? "").toLowerCase(); const orderId = String(b?.order ?? "").split("/").pop() ?? ""; const rawRef = String(b?.ref ?? "");
+  if (!SHOP_RE.test(shop) || !/^\d{1,20}$/.test(orderId) || !RAW_REF_RE.test(rawRef)) return { status: 400, body: { error: "invalid_input" } };
+  const ref = await acceptRef(cfg, rawRef);
+  if (!ref) return { status: 200, body: { ok: true, ignored: "untrusted_ref" } };
+  const cr = await rpc("app_connection_by_shop", { p_platform: "shopify", p_shop: shop });
+  if (cr.error) return { status: 500, body: { error: "temporary_error" } };
+  const c = cr.data as { connection_id: string; status: string } | null;
+  if (!c || c.status === "disconnected") return { status: 200, body: { ok: true, ignored: "unknown_shop" } };
+  const cred = (await rpc("app_credentials", { p_connection: c.connection_id })).data as { shop: string; token: string } | null;
+  if (!cred?.token || cred.token === "revoked") return { status: 200, body: { ok: true, ignored: "unknown_shop" } };
+  const j = await gqlJson(retrying(fetchRaw, cfg.sleep), cfg, cred.shop, cred.token, SHOP_ORDER_QUERY, { id: `gid://shopify/Order/${orderId}` });
+  if (!j) return { status: 500, body: { error: "temporary_error" } };
+  const o = j.data?.order;
+  if (!o) return { status: 409, body: { error: "order_not_ready" } };   // the pixel retries a few times
+  return claimOrder(rpc, cfg, c.connection_id, `shopify-ref:${orderId}`, o.createdAt, o.updatedAt ?? o.createdAt,
+    shopifyGqlOrder(o, typeof o.email === "string" && o.email.includes("@") ? await sha256Hex(o.email.trim().toLowerCase()) : ""), ref);
+}
+
+/** Shared by the Shopify pixel and the Wix script: link a fresh, platform-verified order to a verified ref. */
+async function claimOrder(rpc: Rpc, cfg: Config, conn: string, eventId: string, createdAt: string, at: string, n: NormalizedOrder | null, ref: string): Promise<Reply> {
+  const created = Date.parse(createdAt ?? "");
+  if (!n || !Number.isFinite(created)) return { status: 200, body: { ok: true, ignored: "not_an_order" } };
+  if (Date.now() - created > (cfg.claimHours ?? 72) * 3600_000) return { status: 200, body: { ok: true, ignored: "claim_too_late" } };
+  n.ref = ref;
+  const ing = await rpc("ingest_order_event", { p_connection: conn, p_event: { event_id: eventId, type: "order.link", occurred_at: at, order: n } });
+  if (ing.error) {
+    if (/connection_disconnected|invalid_event/.test(ing.error.message)) return { status: 200, body: { ok: false } };
+    return { status: 500, body: { error: "temporary_error" } };
+  }
+  return { status: 200, body: { ok: true, result: ing.data } };
 }
 
 export async function shopifyWebhook(rpc: Rpc, cfg: Config, headers: { get(k: string): string | null }, raw: string, fetchRaw?: Fetch): Promise<Reply> {
@@ -316,9 +417,11 @@ export async function shopifyWebhook(rpc: Rpc, cfg: Config, headers: { get(k: st
   const emailHash = typeof body?.email === "string" && body.email.includes("@") ? await sha256Hex(body.email.trim().toLowerCase()) : "";
   const order = shopifyOrder(body, emailHash);
   if (!order) return { status: 200, body: { ok: true, ignored: "not_an_order" } };
+  order.ref = order.ref ? await acceptRef(cfg, order.ref) : "";
   if (!order.ref && !order.coupons.length && fetchRaw && order.status !== "cancelled") {
     const cred = (await rpc("app_credentials", { p_connection: c.connection_id })).data as { shop: string; token: string } | null;
-    if (cred?.token && cred.token !== "revoked") order.ref = await shopifyJourneyRef(retrying(fetchRaw, cfg.sleep), cfg, cred.shop, cred.token, order.id).catch(() => "");
+    if (cred?.token && cred.token !== "revoked")
+      order.ref = await acceptRef(cfg, await shopifyJourneyRef(retrying(fetchRaw, cfg.sleep), cfg, cred.shop, cred.token, order.id).catch(() => ""));
   }
   const at = body.updated_at ?? body.created_at ?? new Date().toISOString();
   const r = await rpc("ingest_order_event", { p_connection: c.connection_id, p_event: {
@@ -436,8 +539,10 @@ export async function wixSyncProducts(rpc: Rpc, fetchFn: Fetch, conn: string, to
  *  before payment, cancellations/refunds from Wix webhooks). */
 export async function wixRef(rpc: Rpc, fetchRaw: Fetch, cfg: Config, raw: string): Promise<Reply> {
   let b: any; try { b = JSON.parse(raw); } catch { return { status: 400, body: { error: "invalid_json" } }; }
-  const instance = String(b?.instance ?? "").toLowerCase(); const orderId = String(b?.order ?? ""); const ref = String(b?.ref ?? "");
-  if (!/^[0-9a-f-]{36}$/.test(instance) || !/^[0-9a-f-]{36}$/i.test(orderId) || !REF_RE.test(ref)) return { status: 400, body: { error: "invalid_input" } };
+  const instance = String(b?.instance ?? "").toLowerCase(); const orderId = String(b?.order ?? ""); const rawRef = String(b?.ref ?? "");
+  if (!/^[0-9a-f-]{36}$/.test(instance) || !/^[0-9a-f-]{36}$/i.test(orderId) || !RAW_REF_RE.test(rawRef)) return { status: 400, body: { error: "invalid_input" } };
+  const ref = await acceptRef(cfg, rawRef);
+  if (!ref) return { status: 200, body: { ok: true, ignored: "untrusted_ref" } };
   const cr = await rpc("app_connection_by_shop", { p_platform: "wix", p_shop: instance });
   if (cr.error) return { status: 500, body: { error: "temporary_error" } };
   const c = cr.data as { connection_id: string; status: string } | null;
@@ -446,20 +551,10 @@ export async function wixRef(rpc: Rpc, fetchRaw: Fetch, cfg: Config, raw: string
   const token = await wixToken(fetchFn, cfg, instance);
   if (!token) return { status: 500, body: { error: "temporary_error" } };
   const r = await wixApi(fetchFn, token, `/ecom/v1/orders/${orderId}`);
-  if (r.status === 404) return { status: 200, body: { ok: true, ignored: "unknown_order" } };
+  if (r.status === 404) return { status: 409, body: { error: "order_not_ready" } };   // the script retries a few times
   if (!r.ok) return { status: 500, body: { error: "temporary_error" } };
   const o = (await r.json())?.order;
-  const created = Date.parse(o?.createdDate ?? "");
-  if (!o || !Number.isFinite(created) || Date.now() - created > 2 * 3600_000) return { status: 200, body: { ok: true, ignored: "not_recent" } };
-  const n = wixOrder(o); if (!n) return { status: 200, body: { ok: true, ignored: "not_an_order" } };
-  n.ref = ref;
-  const ing = await rpc("ingest_order_event", { p_connection: c.connection_id, p_event: {
-    event_id: `wix-ref:${orderId}`, type: "order.link", occurred_at: o.updatedDate ?? o.createdDate, order: n } });
-  if (ing.error) {
-    if (/connection_disconnected|invalid_event/.test(ing.error.message)) return { status: 200, body: { ok: false } };
-    return { status: 500, body: { error: "temporary_error" } };
-  }
-  return { status: 200, body: { ok: true } };
+  return claimOrder(rpc, cfg, c.connection_id, `wix-ref:${orderId}`, o?.createdDate, o?.updatedDate ?? o?.createdDate, wixOrder(o), ref);
 }
 
 export async function wixWebhook(rpc: Rpc, cfg: Config, raw: string): Promise<Reply> {

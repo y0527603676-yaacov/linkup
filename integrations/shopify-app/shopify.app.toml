@@ -6,7 +6,7 @@ application_url = "https://linkup-tawny.vercel.app/app/connect"
 embedded = false
 
 [access_scopes]
-scopes = "read_orders,read_products,write_discounts"
+scopes = "read_orders,read_products,write_discounts,write_pixels,read_customer_events"
 
 [auth]
 redirect_urls = ["https://ycuvcpslvkgndytubycn.supabase.co/functions/v1/apps/shopify/callback"]
