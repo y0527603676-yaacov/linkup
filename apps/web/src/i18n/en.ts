@@ -178,6 +178,28 @@ export const en: Dict = {
   },
   orderStatus: { processing: "Processing", completed: "Completed", "on-hold": "On hold", cancelled: "Cancelled", refunded: "Refunded", failed: "Failed", pending: "Awaiting payment" },
   connect: {
+    flow: {
+      steps: ["Address", "Detect", "Connect", "Approve", "Check"],
+      askTitle: "What's your store's address?", askHint: "Paste the address as it appears in your browser. We'll check which system your store runs on and show the right way to connect.",
+      check: "Check my store", checking: "Checking…", recheck: "Check again", otherSite: "Another address",
+      found: "We found a WooCommerce store", pluginReady: "The connection component is already installed on your site – no need to install it again.",
+      redirectTitle: "Your site sends visitors to another address", redirectText: "The address you entered redirects to {to}. It's best to continue with that address.", continueWith: "Continue with this address",
+      restBlocked: "We found a WordPress site, but its connection interface (REST API) is blocked, probably by a security plugin or a hosting setting. You can connect manually below, or ask your host to allow it.",
+      manualTitle: "Manual connection with a key", manualLead: "For when automatic approval isn't possible. Install the connection component and paste one key.",
+      otherWay: "Another way to connect",
+      wpNoWoo: { t: "The site runs on WordPress, but we didn't find WooCommerce", d: "LINKUP connects to WooCommerce stores. If your store is on another site, check its address. If WooCommerce is installed but inactive, activate it and check again." },
+      unsupported: { t: "Your store runs on {p}", d: "There's no connection for {p} yet. Right now only WooCommerce stores can be connected. We'd love to hear that you're waiting for it." },
+      unknown: { t: "We couldn't tell which system your store runs on", d: "The site may block automatic checks, or it runs on a system we don't support yet. If your store is on WooCommerce, you can continue with the manual connection.", wooYes: "My store is on WooCommerce" },
+      errors: {
+        invalid_url: "That address doesn't look valid. Try for example: myshop.com",
+        not_public: "We can't check this address. Make sure it's your store's public address.",
+        unreachable: "We couldn't reach the site. Make sure the address is right and the site is up.",
+        timeout: "The site didn't answer in time. It may be temporary – try again in a moment.",
+        http_error: "The site returned an error. Make sure the address leads to your store's home page.",
+        too_many_redirects: "The site keeps redirecting between addresses. Check the address and try again.",
+      } as Record<string, string>,
+      supportedNow: "Supported today: WooCommerce. Coming: Shopify, Wix, Magento.",
+    },
     wp: {
       title: "Connect with one approval", badge: "Recommended",
       lead: "Approve once and LINKUP installs, activates and connects the tracking component itself. No downloads, no key copying, no developer.",
@@ -208,6 +230,8 @@ export const en: Dict = {
       done: "Your store is connected. The tracking component is installed and configured, and the temporary access was deleted.",
       notRevoked: "Note: we couldn't delete the temporary access. Delete it in WordPress → Users → Profile → Application Passwords (\"LINKUP setup\").",
       errors: {
+        plugin_outdated: "An old version of the connection component is installed. Update it in WordPress → Plugins and try again.",
+        install_failed: "The installation didn't complete on your site. Try again, or connect manually.",
         rejected: "You didn't approve in WordPress. Nothing was installed.",
         expired: "The request expired. Please start again.",
         site_mismatch: "The approval came from a different site than the one you entered. Nothing was installed.",

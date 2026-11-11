@@ -540,3 +540,14 @@ p, li { text-wrap: pretty; }
 .site-nav .btn-primary, .site-nav .btn-primary:hover { color: var(--brand-ink); }
 .amount b, .money-t, .chip.money, .rate-up, .calc-keep, .calc-keep-label { color: var(--money-text); }
 .pill.c-accent { color: var(--accent-text); }
+
+/* Store connection flow */
+.connect-step { gap: 14px; }
+.connect-step > summary { cursor: pointer; }
+.stepper { list-style: none; padding: 0; margin: 0 0 4px; display: flex; gap: 6px; flex-wrap: wrap; }
+.stepper li { display: inline-flex; align-items: center; gap: 6px; font-size: .78rem; color: var(--muted); padding: 4px 10px 4px 6px; border-radius: 999px; background: var(--surface-2); }
+[dir="rtl"] .stepper li { padding: 4px 6px 4px 10px; }
+.stepper li span { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--line); color: var(--ink); font-weight: 700; font-size: .72rem; }
+.stepper li.on { color: var(--brand); background: var(--brand-soft); font-weight: 700; }
+.stepper li.on span { background: var(--brand); color: var(--brand-ink); }
+.found { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0; padding: 12px 14px; border-radius: 14px; background: var(--money-soft); color: var(--money-text); }

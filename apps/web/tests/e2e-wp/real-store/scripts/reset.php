@@ -9,4 +9,5 @@ foreach (['storeadmin', 'editor1'] as $l) WP_Application_Passwords::delete_all_a
 foreach (get_posts(['post_type' => 'shop_coupon', 'post_status' => 'any', 'numberposts' => -1, 'fields' => 'ids']) as $id) wp_delete_post($id, true);
 foreach (wc_get_orders(['limit' => -1, 'return' => 'ids', 'type' => 'shop_order']) as $id) { $o = wc_get_order($id); if ($o) $o->delete(true); }
 if (function_exists('as_unschedule_all_actions')) { as_unschedule_all_actions('linkup_sync'); as_unschedule_all_actions('linkup_send_order'); }
+foreach (wc_get_products(['limit' => -1]) as $pr) { $pr->set_stock_quantity(20); $pr->set_stock_status('instock'); $pr->save(); }   // fresh stock for test purchases
 echo "reset: plugin present=" . (int) file_exists(WP_PLUGIN_DIR . '/linkup-connector') . " orders=" . count(wc_get_orders(['limit' => -1, 'return' => 'ids'])) . "\n";

@@ -65,9 +65,35 @@ export async function connectStore(_prev: ConnectState, form: FormData): Promise
 }
 
 /* ---------- Store connection without a plugin (WooCommerce approves inside the store) ---------- */
+/* ---------- Store platform check (before any redirect to the store's own site) ---------- */
+function detectionParams(d: import("@/lib/store-detect").Detection): Record<string, string> {
+  const q: Record<string, string> = { site: d.finalUrl || d.url, p: d.platform };
+  if (d.error) q.de = d.error;
+  if (d.redirected) { q.rd = d.url; q.site = d.finalUrl; }
+  if (d.linkupPlugin) q.pl = "1";
+  if (d.restBlocked) q.rb = "1";
+  return q;
+}
+
+export async function detectStoreAction(form: FormData) {
+  const org = str(form, "org");
+  const { detectStore } = await import("@/lib/store-detect");
+  const d = await detectStore(str(form, "site"));
+  redirect(back("/app/connect", org, detectionParams(d)));
+}
+
+/** The store must be a reachable WooCommerce site (same host as typed) before LINKUP sends the owner to it. */
+async function requireWooSite(org: string, site: string): Promise<string> {
+  const { detectStore } = await import("@/lib/store-detect");
+  const d = await detectStore(site);
+  if (!d.ok || d.platform !== "woocommerce" || d.redirected || d.restBlocked) redirect(back("/app/connect", org, detectionParams(d)));
+  return d.url;
+}
+
 export async function startWooApi(form: FormData) {
   const org = str(form, "org");
   const sb = await getSupabase();
+  await requireWooSite(org, str(form, "site"));
   const legal = form.getAll("legal").map(String).filter(Boolean);
   if (legal.length) {
     if (str(form, "agree") !== "1") redirect(back("/app/connect", org, { error: "legal_acceptance_required" }));
@@ -105,6 +131,7 @@ export async function startWpConnect(form: FormData) {
     const { error: le } = await sb.rpc("accept_legal", { p_doc_keys: legal, p_type: "store_connection", p_org: org, p_locale: await getLocale() });
     if (le) redirect(back("/app/connect", org, { error: errorCode(le) }));
   }
+  await requireWooSite(org, str(form, "site"));
   const items = form.getAll("consent").map(String).filter((k) => k in w.items);
   const mode = str(form, "mode") === "require" ? "require" : "notice";
   // The exact wording the owner saw and ticked is what gets recorded.

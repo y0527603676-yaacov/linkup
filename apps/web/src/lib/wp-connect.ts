@@ -17,6 +17,13 @@ export const PLUGIN_SLUG = "linkup-connector";
  *  (WordPress's own upload page), and the one approval then activates and connects it. Flip after the listing is live. */
 export const PLUGIN_LISTED = process.env.LINKUP_PLUGIN_LISTED === "1";
 export const PLUGIN_FILE = "linkup-connector/linkup-connector";
+/** Oldest LINKUP Connector version that has the remote setup routes. */
+export const MIN_PLUGIN_VERSION = "0.4.0";
+const older = (a: string, b: string) => {
+  const pa = a.split(".").map((x) => parseInt(x, 10) || 0), pb = b.split(".").map((x) => parseInt(x, 10) || 0);
+  for (let i = 0; i < 3; i++) { if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) < (pb[i] ?? 0); }
+  return false;
+};
 const WC_FILE = "woocommerce/woocommerce";
 
 class WpError extends Error { constructor(public code: string, public step: WpStep, public status = 0) { super(code); } }
@@ -66,6 +73,7 @@ export async function wpSetup(c: WpCreds, f: typeof fetch, getKey: () => Promise
         if (act.status !== 200 || act.json?.status !== "active") throw new WpError(String(act.json?.code ?? "activation_failed"), "plugin", act.status);
       }
       r.activated = true; r.pluginVersion = got.json?.version;
+      if (r.pluginVersion && older(String(r.pluginVersion), MIN_PLUGIN_VERSION)) throw new WpError("plugin_outdated", "plugin");
     } else {
       if (!caps.install_plugins) throw new WpError("cannot_install_plugins", "plugin");
       const ins = await wp.call("plugin", "POST", "/wp/v2/plugins", { slug: PLUGIN_SLUG, status: "active" });
@@ -81,6 +89,7 @@ export async function wpSetup(c: WpCreds, f: typeof fetch, getKey: () => Promise
     // 4. Save the store's LINKUP key through the plugin (store managers only; the key is never echoed back).
     const key = await getKey();
     const cfg = await wp.call("configure", "POST", "/linkup/v1/connect", { key, consent_mode: consentMode });
+    if (cfg.status === 404 && cfg.json?.code === "rest_no_route") throw new WpError("plugin_outdated", "configure", 404);
     if (cfg.status !== 200 || !cfg.json?.connected) throw new WpError(String(cfg.json?.code ?? "configure_failed"), "configure", cfg.status);
     r.configured = true;
     r.ok = true; r.code = "connected";

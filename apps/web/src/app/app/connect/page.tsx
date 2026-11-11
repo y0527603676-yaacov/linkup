@@ -3,7 +3,7 @@ import { loadApp } from "@/lib/orgs";
 import { errorText, shortDate } from "@/lib/format";
 import { ConnectForm } from "./ConnectForm";
 import { LegalChecks, type PendingDoc } from "@/components/LegalChecks";
-import { startWooApi, syncWooApi, startWpConnect, disconnectStore } from "../actions";
+import { startWooApi, syncWooApi, startWpConnect, disconnectStore, detectStoreAction } from "../actions";
 import { PLUGIN_LISTED } from "@/lib/wp-connect";
 
 export default async function Connect({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
@@ -27,11 +27,30 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
   const connected = c?.status === "connected";
   const wpAvail = wpOpen === true;
   const w = l.wp;
-  const wpResult = sp.wp;
+  const f = l.flow;
+  const wpResult = sp.wp === "activation_failed" ? "install_failed" : sp.wp;
+  // Detection result (re-checked on the server before any redirect to the store's site)
+  const platform = sp.p ?? "";
+  const step = !!platform || !!sp.de;
+  const retry = sp.retry === "1";
+  const de = sp.de;
+  const dsite = (sp.site ?? site).replace(/\/+$/, "");
+  const pluginReady = sp.pl === "1";
+  const restBlocked = sp.rb === "1";
+  const manualOnly = sp.m === "1" || restBlocked;
+  const primary: "wp" | "api" | "manual" = manualOnly ? "manual" : wpAvail ? "wp" : api ? "api" : "manual";
+  const names: Record<string, string> = { shopify: "Shopify", wix: "Wix", magento: "Magento" };
+  const Retry = ({ ghost, again, label }: { ghost?: boolean; again?: boolean; label?: string }) => (
+    <div className="row" style={{ gap: 8 }}>
+      {again && <form action={detectStoreAction}><input type="hidden" name="org" value={org.id} /><input type="hidden" name="site" value={sp.rd ?? dsite} />
+        <button className={`btn ${ghost ? "btn-ghost" : "btn-primary"} btn-sm`}>{f.recheck}</button></form>}
+      <a className={`btn btn-ghost btn-sm`} href={`/app/connect?${new URLSearchParams({ org: org.id, retry: "1", site: sp.rd ?? dsite })}`}>{label ?? f.otherSite}</a>
+    </div>
+  );
   return (
     <AppShell ctx={ctx} active="settings" path="/app/connect">
       <div className="narrow">
-        <PageHead title={l.title} lead={api ? l.leadApi : l.lead} />
+        <PageHead title={l.title} lead={l.leadApi} />
         <Alert text={errorText(sp.error, t)} />
         {sp.ok === "sync" && <Alert kind="ok" text={l.syncStarted} />}
         {sp.ok === "disconnected" && <Alert kind="ok" text={l.disconnect.ok} />}
@@ -52,32 +71,62 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
           </div>
         )}
 
-        <section className="stack">
-          <h2 style={{ margin: "8px 0 0" }}>{l.platformTitle}</h2>
-          <div className="platforms">
-            <span className="platform on">WooCommerce</span>
-            {["Shopify", "Wix", "Magento"].map((p) => <span className="platform" key={p}>{p} <small>{l.soon}</small></span>)}
-          </div>
-          <p className="small muted" style={{ margin: 0 }}>{l.otherPlatform} <a href="/contact">{l.tellUs}</a></p>
-        </section>
+        {/* Step 1 – the store's address (always available; collapsed when already connected) */}
+        {(!step || retry) && (
+          <details className="card stack connect-step" open={!connected || retry} style={{ marginTop: 8 }}>
+            <summary className={connected && !retry ? "" : "sr-only"}><b>{f.askTitle}</b></summary>
+            <ol className="stepper" aria-label={f.askTitle}>{f.steps.map((x, i) => <li key={x} className={i === 0 ? "on" : ""}><span>{i + 1}</span>{x}</li>)}</ol>
+            <h2 style={{ margin: 0 }}>{f.askTitle}</h2>
+            <p className="small muted" style={{ margin: 0 }}>{f.askHint}</p>
+            <form action={detectStoreAction} className="stack" data-own-pending="">
+              <input type="hidden" name="org" value={org.id} />
+              <input name="site" required dir="ltr" inputMode="url" autoComplete="url" placeholder="myshop.co.il" defaultValue={sp.site ?? site} aria-label={l.site} />
+              <button className="btn btn-primary btn-block">{f.check}</button>
+            </form>
+            <p className="small muted" style={{ margin: 0 }}>{f.supportedNow}</p>
+          </details>
+        )}
 
-        {wpAvail && !(c?.method === "plugin" && connected) && (
-          <form action={startWpConnect} className="card stack" style={{ marginTop: 16 }}>
+        {/* Step 2/3 – what we found, and the one matching way to connect */}
+        {step && !retry && (
+          <section className="card stack connect-step" style={{ marginTop: 8 }}>
+            <ol className="stepper">{f.steps.map((x, i) => <li key={x} className={i <= (de || platform !== "woocommerce" || sp.rd ? 1 : 2) ? "on" : ""}><span>{i + 1}</span>{x}</li>)}</ol>
+
+            {de ? (
+              <>
+                <p className="alert alert-warn" style={{ margin: 0 }}>{f.errors[de] ?? f.errors.unreachable}</p>
+                <Retry again={de === "timeout" || de === "unreachable" || de === "http_error"} />
+              </>
+            ) : sp.rd ? (
+              <>
+                <h2 style={{ margin: 0 }}>{f.redirectTitle}</h2>
+                <p style={{ margin: 0 }}>{f.redirectText.replace("{to}", dsite.replace(/^https:\/\//, ""))}</p>
+                <form action={detectStoreAction}><input type="hidden" name="org" value={org.id} /><input type="hidden" name="site" value={dsite} />
+                  <button className="btn btn-primary btn-block">{f.continueWith}</button></form>
+                <Retry ghost />
+              </>
+            ) : platform === "woocommerce" ? (
+              <>
+                <p className="found"><span className="dot" /> <b>{f.found}</b> · <span className="ltr">{dsite.replace(/^https:\/\//, "")}</span></p>
+                {pluginReady && <p className="small" style={{ margin: 0 }}>{f.pluginReady}</p>}
+                {restBlocked && <p className="alert alert-warn small" style={{ margin: 0 }}>{f.restBlocked}</p>}
+                {primary === "wp" && (
+                  <form action={startWpConnect} className="card stack" style={{ marginTop: 16 }}>
             <input type="hidden" name="org" value={org.id} />
             <div className="row between" style={{ alignItems: "baseline" }}><h3 style={{ margin: 0 }}>{w.title}</h3><span className="badge badge-brand">{w.badge}</span></div>
-            <p className="small" style={{ margin: 0 }}>{PLUGIN_LISTED ? w.lead : w.leadManual}</p>
-            <ol className="small muted" style={{ margin: 0, paddingInlineStart: 18 }}>{(PLUGIN_LISTED ? w.steps : w.stepsManual).map((x) => <li key={x}>{x}</li>)}</ol>
-            {!PLUGIN_LISTED && (
+            <p className="small" style={{ margin: 0 }}>{PLUGIN_LISTED || pluginReady ? w.lead : w.leadManual}</p>
+            <ol className="small muted" style={{ margin: 0, paddingInlineStart: 18 }}>{(PLUGIN_LISTED || pluginReady ? w.steps : w.stepsManual).map((x) => <li key={x}>{x}</li>)}</ol>
+            {!PLUGIN_LISTED && !pluginReady && (
               <div className="stack small" style={{ gap: 6 }}>
                 <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
                   <a className="btn btn-ghost btn-sm" href="/downloads/linkup-connector.zip" download>{w.download}</a>
-                  {site && /^https:\/\//.test(site) && <a className="btn btn-ghost btn-sm" href={`${site.replace(/\/+$/, "")}/wp-admin/plugin-install.php?tab=upload`} target="_blank" rel="noopener">{w.openUpload}</a>}
+                  <a className="btn btn-ghost btn-sm" href={`${dsite}/wp-admin/plugin-install.php?tab=upload`} target="_blank" rel="noopener">{w.openUpload}</a>
                 </div>
                 <p className="muted" style={{ margin: 0 }}>{w.uploadHow}</p>
               </div>
             )}
-            <label className="field"><span>{l.site}</span>
-              <input name="site" required dir="ltr" inputMode="url" placeholder="https://myshop.co.il" defaultValue={site} /></label>
+            <input type="hidden" name="site" value={dsite} />
+            <p className="small" style={{ margin: 0 }}><span className="muted">{l.site}:</span> <b className="ltr">{dsite}</b></p>
             <fieldset className="stack" style={{ border: 0, padding: 0, margin: 0, gap: 8 }}>
               <legend><b>{w.consentTitle}</b></legend>
               <p className="small" style={{ margin: 0 }}>{w.consentLead}</p>
@@ -103,29 +152,62 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
             <button className="btn btn-primary">{w.cta}</button>
             <p className="small muted" style={{ margin: 0 }}>{w.needAdmin} {w.recorded}</p>
           </form>
-        )}
-
-        {api && !(c?.method === "api" && connected) && (
+                )}
+                {primary === "api" && (
           <form action={startWooApi} className="card stack" style={{ marginTop: 16 }}>
             <input type="hidden" name="org" value={org.id} />
             <div className="row between" style={{ alignItems: "baseline" }}><h3 style={{ margin: 0 }}>{l.apiTitle}</h3><span className="badge badge-brand">{l.recommended}</span></div>
             <ol className="small" style={{ margin: 0, paddingInlineStart: 18 }}>{l.apiSteps.map((s) => <li key={s}>{s}</li>)}</ol>
-            <label className="field"><span>{l.site}</span>
-              <input name="site" required dir="ltr" inputMode="url" placeholder="https://myshop.co.il" defaultValue={site} /></label>
+            <input type="hidden" name="site" value={dsite} />
+            <p className="small" style={{ margin: 0 }}><span className="muted">{l.site}:</span> <b className="ltr">{dsite}</b></p>
             <LegalChecks docs={legal} locale={locale} label={t.lc.store} />
             <button className="btn btn-primary">{l.apiCta}</button>
             <details className="small muted"><summary>{l.apiWhatTitle}</summary>
               <ul style={{ margin: "6px 0 0", paddingInlineStart: 18 }}>{l.apiWhat.map((s) => <li key={s}>{s}</li>)}</ul></details>
           </form>
+                )}
+                {primary === "manual" && (
+                  <div className="stack">
+                    <h3 style={{ margin: 0 }}>{f.manualTitle}</h3>
+                    <p className="small muted" style={{ margin: 0 }}>{f.manualLead}</p>
+                    <ConnectForm orgId={org.id} l={l} errors={t.errors} defaultSite={dsite} rotate={connected && c?.method === "plugin"}
+                      legal={legal} locale={locale} legalLead={t.lc.store} />
+                  </div>
+                )}
+                {primary !== "manual" && (
+                  <details className="small">
+                    <summary>{f.otherWay}</summary>
+                    <div className="stack" style={{ marginTop: 8 }}>
+                      <p className="small muted" style={{ margin: 0 }}>{f.manualLead}</p>
+                      <ConnectForm orgId={org.id} l={l} errors={t.errors} defaultSite={dsite} rotate={connected && c?.method === "plugin"}
+                        legal={legal} locale={locale} legalLead={t.lc.store} />
+                    </div>
+                  </details>
+                )}
+                <Retry ghost label={f.otherSite} />
+              </>
+            ) : platform === "wordpress" ? (
+              <>
+                <h2 style={{ margin: 0 }}>{f.wpNoWoo.t}</h2>
+                <p style={{ margin: 0 }}>{f.wpNoWoo.d}</p>
+                <Retry again />
+              </>
+            ) : platform === "shopify" || platform === "wix" || platform === "magento" ? (
+              <>
+                <h2 style={{ margin: 0 }}>{f.unsupported.t.replace("{p}", names[platform] ?? platform)}</h2>
+                <p style={{ margin: 0 }}>{f.unsupported.d.replace("{p}", names[platform] ?? platform)} <a href="/contact">{l.tellUs}</a></p>
+                <Retry ghost label={f.otherSite} />
+              </>
+            ) : (
+              <>
+                <h2 style={{ margin: 0 }}>{f.unknown.t}</h2>
+                <p style={{ margin: 0 }}>{f.unknown.d}</p>
+                <a className="btn btn-primary btn-block" href={`/app/connect?${new URLSearchParams({ org: org.id, site: dsite, p: "woocommerce", m: "1" })}`}>{f.unknown.wooYes}</a>
+                <Retry ghost again />
+              </>
+            )}
+          </section>
         )}
-
-        <details className="card card-flat" style={{ marginTop: 16 }} open={!api && !wpAvail}>
-          <summary><b>{api || wpAvail ? l.pluginAlt : l.pluginTitle}</b></summary>
-          <p className="small muted">{l.pluginWhy}</p>
-          <ConnectForm orgId={org.id} l={l} errors={t.errors} defaultSite={site} rotate={connected && c?.method === "plugin"}
-            legal={legal} locale={locale} legalLead={t.lc.store} />
-          {connected && c?.method === "plugin" && <p className="small muted">{l.rotateNote}</p>}
-        </details>
 
         {c && c.status !== "disconnected" && (
           <details className="card card-flat" style={{ marginTop: 16 }}>
