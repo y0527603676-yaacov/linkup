@@ -465,3 +465,71 @@ export async function saveTaxProfile(form: FormData) {
   });
   redirect(back("/app/settings", org, error ? { error: errorCode(error) } : { ok: "1" }));
 }
+
+/* ---------- Universal Connect: custom-site API, manual coupon mode, sale claims ---------- */
+const toMinor = (v: string) => {
+  const n = Number(v.replace(/[,\s₪]/g, ""));
+  return Number.isFinite(n) && v.trim() !== "" ? Math.round(n * 100) : NaN;
+};
+async function acceptStoreLegal(form: FormData, org: string, failTo: string) {
+  const legal = form.getAll("legal").map(String).filter(Boolean);
+  if (!legal.length) return;
+  const sb = await getSupabase();
+  if (str(form, "agree") !== "1") redirect(`${failTo}&error=legal_acceptance_required`);
+  const { error } = await sb.rpc("accept_legal", { p_doc_keys: legal, p_type: "store_connection", p_org: org, p_locale: await getLocale() });
+  if (error) redirect(`${failTo}&error=${errorCode(error)}`);
+}
+
+/** Owner chose "my developer connects the site" or "I report sales myself". */
+export async function createPlatformConnection(form: FormData) {
+  const org = str(form, "org"); const kind = str(form, "kind") === "manual" ? "manual" : "custom";
+  const page = kind === "manual" ? "/app/sales" : "/app/connect/api";
+  await acceptStoreLegal(form, org, `${page}?org=${org}`);
+  const sb = await getSupabase();
+  const { data, error } = await sb.rpc("create_platform_connection", { p_org: org, p_site_url: str(form, "site"), p_kind: kind });
+  if (error) redirect(back(page, org, { error: errorCode(error), site: str(form, "site") }));
+  const r = data as { connection_key: string | null };
+  if (kind === "custom" && r.connection_key) {
+    // The key is shown once: carried in a short-lived, http-only cookie (never in the address bar or logs).
+    (await cookies()).set("lk_api_key", r.connection_key, { httpOnly: true, sameSite: "lax", path: "/app/connect/api", maxAge: 300, secure: true });
+  }
+  redirect(back(page, org, { ok: "created" }));
+}
+
+export async function manualReport(form: FormData) {
+  const org = str(form, "org");
+  const sb = await getSupabase();
+  const { error } = await sb.rpc("manual_report_order", {
+    p_org: org, p_order_id: str(form, "order"), p_order_date: str(form, "date") || null,
+    p_total_minor: toMinor(str(form, "total")), p_shipping_minor: toMinor(str(form, "shipping") || "0"), p_coupon: str(form, "coupon"),
+  });
+  redirect(back("/app/sales", org, error ? { error: errorCode(error) } : { ok: "reported" }));
+}
+
+export async function manualUpdate(form: FormData) {
+  const org = str(form, "org"); const action = str(form, "action") === "refunded" ? "refunded" : "cancelled";
+  const sb = await getSupabase();
+  const { error } = await sb.rpc("manual_update_order", {
+    p_org: org, p_order_id: str(form, "order"), p_action: action,
+    p_amount_minor: action === "refunded" ? toMinor(str(form, "amount")) : null,
+  });
+  redirect(back("/app/sales", org, error ? { error: errorCode(error) } : { ok: action }));
+}
+
+export async function openSaleClaim(form: FormData) {
+  const org = str(form, "org");
+  const sb = await getSupabase();
+  const amount = str(form, "amount");
+  const { error } = await sb.rpc("open_sale_claim", {
+    p_agreement: str(form, "agreement"), p_order_ref: str(form, "order"), p_order_date: str(form, "date") || null,
+    p_amount_minor: amount ? toMinor(amount) : null, p_note: str(form, "note") || null,
+  });
+  redirect(back("/app/claims", org, error ? { error: errorCode(error) } : { ok: "opened" }));
+}
+
+export async function answerSaleClaim(form: FormData) {
+  const org = str(form, "org");
+  const sb = await getSupabase();
+  const { error } = await sb.rpc("answer_sale_claim", { p_claim: str(form, "claim"), p_status: str(form, "status"), p_response: str(form, "response") || null });
+  redirect(back("/app/claims", org, error ? { error: errorCode(error) } : { ok: "answered" }));
+}

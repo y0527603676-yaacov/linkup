@@ -55,6 +55,22 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
       <ul style={{ margin: "4px 0 0", paddingInlineStart: 18 }}>{f.prereqs.map((x) => <li key={x}>{x}</li>)}</ul>
     </div>
   );
+  const u = t.uc;
+  /** Other supported ways to connect (only ones that really work today). */
+  const Alternatives = ({ api = true }: { api?: boolean }) => (
+    <div className="stack" style={{ gap: 10, marginTop: 4 }}>
+      {api && (
+        <div className="card card-flat stack" style={{ gap: 6 }}>
+          <b>{u.api.t}</b><p className="small muted" style={{ margin: 0 }}>{u.api.d}</p>
+          <a className="btn btn-ghost btn-sm" href={`/app/connect/api?${new URLSearchParams({ org: org.id, site: dsite })}`}>{u.api.cta}</a>
+        </div>
+      )}
+      <div className="card card-flat stack" style={{ gap: 6 }}>
+        <b>{u.manual.t}</b><p className="small muted" style={{ margin: 0 }}>{u.manual.d}</p>
+        <a className="btn btn-ghost btn-sm" href={`/app/sales?${new URLSearchParams({ org: org.id, site: dsite })}`}>{u.manual.cta}</a>
+      </div>
+    </div>
+  );
   const names: Record<string, string> = { shopify: "Shopify", wix: "Wix", magento: "Magento" };
   const Retry = ({ ghost, again, label }: { ghost?: boolean; again?: boolean; label?: string }) => (
     <div className="row" style={{ gap: 8 }}>
@@ -77,9 +93,11 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
         {c && (
           <div className="card card-flat stack" style={{ marginBottom: 16, gap: 6 }}>
             <p className="row" style={{ margin: 0 }}><span className={`dot${connected && !c.last_error ? "" : " dot-off"}`} /><b>{t.dash.connection[c.status]}</b> · <span className="ltr">{c.site_url}</span></p>
-            <p className="small muted" style={{ margin: 0 }}>{c.method === "api" ? l.viaApi : l.viaPlugin}
+            <p className="small muted" style={{ margin: 0 }}>{c.method === "api" ? l.viaApi : c.method === "signed_api" ? u.viaCustom : c.method === "manual" ? u.viaManual : l.viaPlugin}
               {c.last_sync_at ? ` · ${t.dash.connection.lastSync}: ${shortDate(c.last_sync_at, locale)}` : ""}
               {c.method === "plugin" && c.plugin_version ? ` · v${c.plugin_version}` : ""}</p>
+            {c.method === "manual" && c.status === "connected" && <a className="btn btn-primary btn-sm" href={`/app/sales?org=${org.id}`}>{u.toSales}</a>}
+            {c.method === "signed_api" && <a className="btn btn-ghost btn-sm" href={`/app/connect/api?org=${org.id}`}>{u.toApi}</a>}
             {c.last_error && <p className="alert alert-warn small" style={{ margin: 0 }}>{l.errors[c.last_error] ?? l.errors.other}</p>}
             {c.method === "api" && c.status !== "disconnected" && (
               <form action={syncWooApi}><input type="hidden" name="org" value={org.id} /><button className="btn btn-ghost btn-sm">{l.syncNow}</button></form>
@@ -209,11 +227,13 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
                 <h2 style={{ margin: 0 }}>{f.wpNoWoo.t}</h2>
                 <p style={{ margin: 0 }}>{f.wpNoWoo.d}</p>
                 <Retry again />
+                <Alternatives />
               </>
             ) : platform === "shopify" || platform === "wix" || platform === "magento" ? (
               <>
                 <h2 style={{ margin: 0 }}>{f.unsupported.t.replace("{p}", names[platform] ?? platform)}</h2>
-                <p style={{ margin: 0 }}>{f.unsupported.d.replace("{p}", names[platform] ?? platform)} <a href="/contact">{l.tellUs}</a></p>
+                <p style={{ margin: 0 }}>{u.platformSoon.replace("{p}", names[platform] ?? platform)} <a href="/contact">{l.tellUs}</a></p>
+                <Alternatives api={false} />
                 <Retry ghost label={f.otherSite} />
               </>
             ) : wantManual && adminOk ? (
@@ -230,14 +250,19 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
             ) : wantManual ? (
               <>
                 <h2 style={{ margin: 0 }}>{f.manualChoice.noAdminT}</h2>
-                <p style={{ margin: 0 }}>{f.manualChoice.notVerified} <a href="/contact">{l.tellUs}</a></p>
+                <p style={{ margin: 0 }}>{f.manualChoice.notVerified}</p>
+                <Alternatives />
                 <Retry ghost again />
               </>
             ) : (
               <>
                 <h2 style={{ margin: 0 }}>{f.unknown.t}</h2>
                 <p style={{ margin: 0 }}>{f.unknown.d}</p>
-                <a className="btn btn-primary btn-block" href={`/app/connect?${new URLSearchParams({ org: org.id, site: dsite, check: "1", manual: "1" })}`}>{f.unknown.wooYes}</a>
+                <h3 style={{ margin: "8px 0 0" }}>{u.choicesTitle}</h3>
+                <div className="card card-flat stack" style={{ gap: 6 }}>
+                  <a className="btn btn-ghost btn-sm" href={`/app/connect?${new URLSearchParams({ org: org.id, site: dsite, check: "1", manual: "1" })}`}>{f.unknown.wooYes}</a>
+                </div>
+                <Alternatives />
                 <Retry ghost again />
               </>
             )}
