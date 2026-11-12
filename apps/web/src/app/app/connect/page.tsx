@@ -3,6 +3,7 @@ import { loadApp } from "@/lib/orgs";
 import { errorText, shortDate } from "@/lib/format";
 import { ConnectForm } from "./ConnectForm";
 import { LegalChecks, type PendingDoc } from "@/components/LegalChecks";
+import { shopifyAppOffered } from "@/lib/app-test-shops";
 import { startWooApi, syncWooApi, startWpConnect, disconnectStore, detectStoreAction, startAppInstall } from "../actions";
 
 /** Platform apps are offered to stores only after a real end-to-end test (set per platform on the server). */
@@ -239,7 +240,7 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
                 <Retry again />
                 <Alternatives />
               </>
-            ) : (platform === "shopify" && APP_ON.shopify) || (platform === "wix" && APP_ON.wix) ? (
+            ) : (platform === "shopify" && (APP_ON.shopify || shopifyAppOffered(d?.shopifyDomain))) || (platform === "wix" && APP_ON.wix) ? (
               <>
                 <p className="found" style={{ margin: 0 }}><span className="dot" /> <b>{u.app.found.replace("{p}", names[platform] ?? platform)}</b> · <span className="ltr">{dsite.replace(/^https?:\/\//, "")}</span></p>
                 <p style={{ margin: 0 }}>{u.app.lead.replace("{p}", names[platform] ?? platform)}</p>

@@ -246,6 +246,39 @@ describe("Shopify without any discount: LINKUP's app pixel (switched on by the a
   });
 });
 
+describe("Controlled activation: only the allowed test shop", () => {
+  const ctl = { ...cfg, allowedShops: ["linkup-test.myshopify.com"] };
+  it("install start: allowed shop → Shopify approval with the app's Client ID and LINKUP's scopes; other shops refused", () => {
+    const ok = core.shopifyInstall(ctl, new URLSearchParams({ shop: "linkup-test.myshopify.com", state: "s".repeat(40) }));
+    const u = new URL(ok.redirect!);
+    expect(u.origin + u.pathname).toBe("https://linkup-test.myshopify.com/admin/oauth/authorize");
+    expect(u.searchParams.get("client_id")).toBe("key123");
+    expect(u.searchParams.get("scope")).toBe("read_orders,read_products,write_discounts,write_pixels,read_customer_events");
+    expect(u.searchParams.get("redirect_uri")).toBe("https://fn.example/functions/v1/apps/shopify/callback");
+    expect(core.shopifyInstall(ctl, new URLSearchParams({ shop: "other.myshopify.com", state: "s".repeat(40) })).redirect).toContain("error=shop_not_allowed");
+    expect(core.shopifyInstall(ctl, new URLSearchParams({ shop: "evil.com", state: "s".repeat(40) })).redirect).toContain("error=app_install_failed");
+  });
+  it("callback from a shop outside the list → refused before any token exchange", async () => {
+    let calls = 0; const f: core.Fetch = async (u, i) => { calls++; return shop.f(u, i); };
+    const r = await core.shopifyCallback(rpc, f, ctl, signQuery({ code: "c", shop: "other.myshopify.com", state: "x", timestamp: "1" }));
+    expect(r.redirect).toContain("error=shop_not_allowed");
+    expect(calls).toBe(0);
+  });
+  it("order webhook / pixel claim from a shop outside the list → ignored", async () => {
+    const h = hook("orders/create", order(940001), "A1");   // signed for linkshop.myshopify.com, which isn't allowed here
+    expect((await core.shopifyWebhook(rpc, ctl, h.headers, h.raw, shop.f)).body).toMatchObject({ ignored: "shop_not_allowed" });
+    expect((await core.shopifyRef(rpc, shop.f, ctl, JSON.stringify({ shop: "linkshop.myshopify.com", order: "1", ref: sref(code, now()) }))).body)
+      .toMatchObject({ ignored: "shop_not_allowed" });
+    expect(await attr("940001")).toEqual([]);
+  });
+  it("web: the app is offered only for the test shop (until a launch flag is set)", async () => {
+    const { shopifyAppOffered, SHOPIFY_SCOPES } = await import("../../src/lib/app-test-shops");
+    expect(shopifyAppOffered("linkup-test.myshopify.com")).toBe(true);
+    expect(shopifyAppOffered("someone.myshopify.com")).toBe(false);
+    expect(SHOPIFY_SCOPES.split(",")).toEqual(core.SHOPIFY_SCOPES);
+  });
+});
+
 describe("Scheduled sync and retries", () => {
   it("rate limit (429) is retried; the call then succeeds", async () => {
     shop.st.fail429 = 2;

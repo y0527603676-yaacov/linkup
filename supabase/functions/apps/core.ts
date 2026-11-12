@@ -22,6 +22,7 @@ export type Config = {
   refSecret?: string;      // signs personal-link visits (same value as LINKUP_REF_SECRET in the web app)
   claimHours?: number;     // how long after the order a storefront purchase event may still be linked to it (default 72)
   sleep?: (ms: number) => Promise<void>;   // injectable for tests
+  allowedShops?: string[]; // controlled test: only these Shopify shops may install / report orders (undefined = all)
 };
 export type Reply = { status: number; body?: unknown; redirect?: string };
 
@@ -190,6 +191,20 @@ export function shopifyInstallUrl(cfg: Config, shop: string, state: string): str
   return `https://${shop}/admin/oauth/authorize?${q}`;
 }
 
+/** Controlled activation: shops outside the allow-list can't install, and their order events are ignored. */
+export const shopAllowed = (cfg: Config, shop: string) => !cfg.allowedShops || cfg.allowedShops.includes("*") || cfg.allowedShops.includes(shop);
+
+/** Start of the install (from LINKUP's connect page): the one-time state was created by start_app_install for the
+ *  signed-in store owner; this route only adds the app's Client ID (kept in function secrets) and sends the owner to
+ *  Shopify's approval screen. */
+export function shopifyInstall(cfg: Config, params: URLSearchParams): Reply {
+  const shop = (params.get("shop") ?? "").toLowerCase(); const state = params.get("state") ?? "";
+  if (!SHOP_RE.test(shop) || !/^[A-Za-z0-9_-]{20,128}$/.test(state)) return { status: 302, redirect: back(cfg, { error: "app_install_failed" }) };
+  if (!shopAllowed(cfg, shop)) return { status: 302, redirect: back(cfg, { error: "shop_not_allowed" }) };
+  const url = shopifyInstallUrl(cfg, shop, state);
+  return url ? { status: 302, redirect: url } : { status: 302, redirect: back(cfg, { error: "app_install_failed" }) };
+}
+
 const back = (cfg: Config, params: Record<string, string>) => `${cfg.appBase}/app/connect?${new URLSearchParams(params)}`;
 
 export async function shopifyCallback(rpc: Rpc, fetchRaw: Fetch, cfg: Config, params: URLSearchParams): Promise<Reply> {
@@ -198,6 +213,7 @@ export async function shopifyCallback(rpc: Rpc, fetchRaw: Fetch, cfg: Config, pa
   if (!SHOP_RE.test(shop) || !state || !code || !(await verifyShopifyQuery(params, cfg.shopifySecret ?? ""))) {
     return { status: 302, redirect: back(cfg, { error: "app_install_failed" }) };
   }
+  if (!shopAllowed(cfg, shop)) return { status: 302, redirect: back(cfg, { error: "shop_not_allowed" }) };
   const tr = await fetchFn(`https://${shop}/admin/oauth/access_token`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ client_id: cfg.shopifyKey, client_secret: cfg.shopifySecret, code }),
@@ -339,7 +355,8 @@ export async function shopifyEnsurePixel(fetchFn: Fetch, cfg: Config, shop: stri
   return "failed";
 }
 
-const SHOP_ORDER_QUERY = `query($id: ID!) { order(id: $id) { legacyResourceId createdAt updatedAt cancelledAt currencyCode email
+// No customer contact fields (protected customer data level 2): the e-mail hash, when allowed, comes from the webhook.
+const SHOP_ORDER_QUERY = `query($id: ID!) { order(id: $id) { legacyResourceId createdAt updatedAt cancelledAt currencyCode
   displayFinancialStatus displayFulfillmentStatus discountCodes
   totalPriceSet { shopMoney { amount } } totalTaxSet { shopMoney { amount } } totalShippingPriceSet { shopMoney { amount } }
   shippingLines(first: 20) { nodes { taxLines { priceSet { shopMoney { amount } } } } }
@@ -367,6 +384,7 @@ export async function shopifyRef(rpc: Rpc, fetchRaw: Fetch, cfg: Config, raw: st
   let b: any; try { b = JSON.parse(raw); } catch { return { status: 400, body: { error: "invalid_json" } }; }
   const shop = String(b?.shop ?? "").toLowerCase(); const orderId = String(b?.order ?? "").split("/").pop() ?? ""; const rawRef = String(b?.ref ?? "");
   if (!SHOP_RE.test(shop) || !/^\d{1,20}$/.test(orderId) || !RAW_REF_RE.test(rawRef)) return { status: 400, body: { error: "invalid_input" } };
+  if (!shopAllowed(cfg, shop)) return { status: 200, body: { ok: true, ignored: "shop_not_allowed" } };
   const ref = await acceptRef(cfg, rawRef);
   if (!ref) return { status: 200, body: { ok: true, ignored: "untrusted_ref" } };
   const cr = await rpc("app_connection_by_shop", { p_platform: "shopify", p_shop: shop });
@@ -380,7 +398,7 @@ export async function shopifyRef(rpc: Rpc, fetchRaw: Fetch, cfg: Config, raw: st
   const o = j.data?.order;
   if (!o) return { status: 409, body: { error: "order_not_ready" } };   // the pixel retries a few times
   return claimOrder(rpc, cfg, c.connection_id, `shopify-ref:${orderId}`, o.createdAt, o.updatedAt ?? o.createdAt,
-    shopifyGqlOrder(o, typeof o.email === "string" && o.email.includes("@") ? await sha256Hex(o.email.trim().toLowerCase()) : ""), ref);
+    shopifyGqlOrder(o), ref);
 }
 
 /** Shared by the Shopify pixel and the Wix script: link a fresh, platform-verified order to a verified ref. */
@@ -410,6 +428,7 @@ export async function shopifyWebhook(rpc: Rpc, cfg: Config, headers: { get(k: st
     return { status: 200, body: { ok: true, ...(r.data ?? {}) } };
   }
   if (!topic.startsWith("orders/")) return { status: 200, body: { ok: true, ignored: topic } };
+  if (!shopAllowed(cfg, shop)) return { status: 200, body: { ok: true, ignored: "shop_not_allowed" } };
   const cr = await rpc("app_connection_by_shop", { p_platform: "shopify", p_shop: shop });
   if (cr.error) return { status: 500, body: { error: "temporary_error" } };
   const c = cr.data as { connection_id: string } | null;

@@ -1,4 +1,5 @@
 "use server";
+import { shopifyAppOffered } from "@/lib/app-test-shops";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -539,19 +540,21 @@ export async function adminCloseConnectHelp(form: FormData) {
 /* ---------- Platform apps (Shopify / Wix): the owner approves in the platform; everything after is automatic ---------- */
 export async function startAppInstall(form: FormData) {
   const org = str(form, "org"); const platform = str(form, "platform") === "wix" ? "wix" : "shopify";
-  const on = platform === "shopify" ? process.env.LINKUP_SHOPIFY_APP === "1" : process.env.LINKUP_WIX_APP === "1";
-  const fail = (e: string) => redirect(back("/app/connect", org, { site: str(form, "site"), check: "1", error: e }));
-  if (!on) fail("not_available");
-  await acceptStoreLegal(form, org, `/app/connect?org=${org}&site=${encodeURIComponent(str(form, "site"))}&check=1`);
   const shop = str(form, "shop").toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  const on = platform === "shopify" ? shopifyAppOffered(shop) : process.env.LINKUP_WIX_APP === "1";
+  const fail = (e: string) => redirect(back("/app/connect", org, { site: str(form, "site"), check: "1", error: e }));
+  if (!on) fail(platform === "shopify" ? "shop_not_allowed" : "not_available");
+  await acceptStoreLegal(form, org, `/app/connect?org=${org}&site=${encodeURIComponent(str(form, "site"))}&check=1`);
   const sb = await getSupabase();
+  // Never add an app connection to a store that already works through another connection (e.g. WooCommerce).
+  const { data: others } = await sb.from("store_connections").select("site_url, status").eq("org_id", org).eq("status", "connected");
+  if ((others ?? []).some((c: { site_url: string }) => c.site_url !== `https://${shop}`)) fail("store_already_connected");
   const { data, error } = await sb.rpc("start_app_install", { p_org: org, p_platform: platform, p_shop: platform === "shopify" ? shop : null });
   if (error) fail(errorCode(error));
   const fnBase = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/apps`;
   if (platform === "shopify") {
-    const q = new URLSearchParams({ client_id: process.env.SHOPIFY_API_KEY ?? "", scope: "read_orders,read_products,write_discounts",
-      redirect_uri: `${fnBase}/shopify/callback`, state: String(data) });
-    redirect(`https://${shop}/admin/oauth/authorize?${q}`);
+    // The edge function adds the app's Client ID (kept in function secrets) and sends the owner to Shopify's approval.
+    redirect(`${fnBase}/shopify/install?${new URLSearchParams({ shop, state: String(data) })}`);
   }
   redirect(`https://www.wix.com/installer/install?${new URLSearchParams({ appId: process.env.WIX_APP_ID ?? "", redirectUrl: `${fnBase}/wix/callback`, state: String(data) })}`);
 }

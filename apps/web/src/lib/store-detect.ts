@@ -181,6 +181,9 @@ export async function detectStore(input: string, opts: { fetcher?: Fetcher; allo
   const myshop = /([a-z0-9][a-z0-9-]{0,60}\.myshopify\.com)/i.exec(home.body.slice(0, MAX_BODY))?.[1]?.toLowerCase();
   r.platform = cls.platform;
   if (cls.platform === "shopify" && myshop) r.shopifyDomain = myshop;
+  // An address on *.myshopify.com is a Shopify store by definition (also when its storefront is password-protected).
+  const inHost = new URL(url).host.toLowerCase();
+  if (/^[a-z0-9][a-z0-9-]{0,60}\.myshopify\.com$/.test(inHost)) { r.platform = "shopify"; r.shopifyDomain = inHost; }
   // Even when the home page is unclear (blocked, 403, a JS-only page), a WordPress REST index is a reliable signal.
   if (cls.platform === "wordpress" || cls.platform === "woocommerce" || cls.platform === "unknown") {
     // `_fields=namespaces` keeps the answer tiny (a full REST index of a WooCommerce site is hundreds of KB).
