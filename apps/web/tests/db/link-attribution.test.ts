@@ -250,6 +250,84 @@ describe("Shopify without any discount: LINKUP's app pixel (switched on by the a
   });
 });
 
+describe("Server-side attribution without the pixel: the signed UTM copy in Shopify's customer journey", () => {
+  // What Shopify was seen to keep on the development store: the landing page WITHOUT lku/lkt/lks, but the UTM parameters.
+  const cfgU: core.Config = { ...cfg, utmShops: ["linkshop.myshopify.com"] };
+  const sendU = async (topic: string, body: object, id: string, c = cfgU) => { const h = hook(topic, body, id); return (await core.shopifyWebhook(rpc, c, h.headers, h.raw, shop.f)).body as any; };
+  const utm = (c: string, at: number, sig = signVisit(SECRET, c, at)) => ({ campaign: c, content: `lk1.${at}.${sig}` });
+  const journey = (u: object | null, landingPage = "https://linkshop.myshopify.com/", ready = true) => ({ ready,
+    lastVisit: { landingPage, occurredAt: new Date().toISOString(), utmParameters: u }, firstVisit: null });
+  const src = async (ext: string) => (await q(`select payload->'order'->>'ref_src' s from order_events where external_order_id = $1 and payload->'order'->>'ref' <> '' order by received_at limit 1`, [ext]))[0]?.s ?? null;
+  it("the personal link carries the signed visit also in utm_content; the server reads it from a URL or Shopify's UTM object", async () => {
+    const d = partnerDestination({ code, url: "https://linkshop.myshopify.com", platform: "shopify" }, 1_790_000_000, SECRET)!;
+    expect(d.searchParams.get("utm_campaign")).toBe(code);
+    expect(d.searchParams.get("utm_content")).toBe(`lk1.1790000000.${signVisit(SECRET, code, 1_790_000_000)}`);
+    expect(d.searchParams.get("lku")).toBe(code);   // existing links / pixel unchanged
+    expect(core.refFromUtm(d.toString())).toEqual({ code, at: 1_790_000_000, sig: signVisit(SECRET, code, 1_790_000_000) });
+    expect(core.refFromUtm(utm(code, 1_790_000_000))).toEqual({ code, at: 1_790_000_000, sig: signVisit(SECRET, code, 1_790_000_000) });
+    expect(core.refFromUtm({ campaign: code, content: "spring-sale" })).toBeNull();
+    expect(partnerDestination({ code, url: "https://linkshop.myshopify.com", platform: "shopify" }, 1_790_000_000, undefined)!.searchParams.get("utm_content")).toBeNull();
+    expect(partnerDestination({ code, url: "https://woo-shop.co.il", platform: "woocommerce" }, 1_790_000_000, SECRET)!.searchParams.get("utm_content")).toBeNull();   // other platforms unchanged
+  });
+  it("no pixel, landing page stripped by Shopify → attributed on the server from the signed UTM copy (source recorded)", async () => {
+    shop.st.journey = journey(utm(code, now() - 3 * 86400));
+    await sendU("orders/create", order(950001), "U1");
+    expect(await attr("950001")).toEqual([{ method: "link", creator_org_id: org.creator }]);
+    expect(await creatorTotal("950001")).toBe(1_000);
+    expect(await src("950001")).toBe("journey_utm");
+    await sendU("orders/updated", order(950001, { updated_at: new Date(Date.now() + 1000).toISOString() }), "U1b");   // later events: no second commission
+    expect(await creatorTotal("950001")).toBe(1_000);
+  });
+  it("shop not (yet) allowed to rely on UTM → not used at all", async () => {
+    shop.st.journey = journey(utm(code, now() - 60));
+    await sendU("orders/create", order(950002), "U2", cfg);
+    expect(await attr("950002")).toEqual([]);
+  });
+  it("forgery refused: wrong signature, signature of another code, time moved, visit in the future, outside the window", async () => {
+    const at = now() - 60;
+    const cases: [number, object][] = [
+      [950003, { campaign: code, content: `lk1.${at}.AAAAAAAAAAAAAAAAAAAAAA` }],
+      [950004, { campaign: otherCode, content: `lk1.${at}.${signVisit(SECRET, code, at)}` }],      // moved to another creator
+      [950005, { campaign: code, content: `lk1.${at - 86400}.${signVisit(SECRET, code, at)}` }],   // time changed
+      [950006, utm(code, now() + 86400)],                                                          // future visit
+      [950007, utm(code, now() - 40 * 86400)],                                                     // window is 30 days
+    ];
+    for (const [id, u] of cases) { shop.st.journey = journey(u); await sendU("orders/create", order(id), `F-${id}`); expect(await attr(String(id))).toEqual([]); }
+  });
+  it("another store's creator with a valid signature → ignored (the code must belong to this store)", async () => {
+    shop.st.journey = journey(utm(otherCode, now() - 60));
+    await sendU("orders/create", order(950008), "U8");
+    expect(await attr("950008")).toEqual([]);
+  });
+  it("valid coupon AND signed UTM visit of the same or another creator → coupon wins, one attribution, no double commission", async () => {
+    shop.st.journey = journey(utm(code, now() - 60));
+    await sendU("orders/create", order(950009, { discount_codes: [{ code }] }), "U9");
+    expect(await attr("950009")).toEqual([{ method: "coupon", creator_org_id: org.creator }]);
+    expect(await creatorTotal("950009")).toBe(1_000);
+  });
+  it("journey not ready at the first event → retried on the next order event", async () => {
+    shop.st.journey = journey(utm(code, now() - 60), "https://linkshop.myshopify.com/", false);
+    await sendU("orders/create", order(950010), "U10a");
+    expect(await attr("950010")).toEqual([]);
+    shop.st.journey = journey(utm(code, now() - 60));
+    await sendU("orders/updated", order(950010, { updated_at: new Date(Date.now() + 1000).toISOString() }), "U10b");
+    expect((await attr("950010"))[0]?.method).toBe("link");
+  });
+  it("landing_site in the order webhook carrying only the UTM copy → used for allowed shops only", async () => {
+    shop.st.journey = null;
+    const lp = `/?utm_source=linkup&utm_medium=partner&utm_campaign=${code}&utm_content=lk1.${now() - 60}.${signVisit(SECRET, code, now() - 60)}`;
+    await sendU("orders/create", order(950011, { landing_site: lp }), "U11", cfg);
+    expect(await attr("950011")).toEqual([]);
+    await sendU("orders/create", order(950012, { landing_site: lp }), "U12");
+    expect((await attr("950012"))[0]?.method).toBe("link");
+    expect(await src("950012")).toBe("landing_utm");
+  });
+  it("pixel claims are tagged as such (to tell the paths apart in real tests)", async () => {
+    expect(core.shopifyOrder({ id: 1, currency: "USD", total_price: "1", landing_site: land(code, now()) })!.ref_src).toBe("landing");
+    expect(core.shopifyOrder({ id: 1, currency: "USD", total_price: "1" })!.ref_src).toBe("");
+  });
+});
+
 describe("Controlled activation: only the allowed test shop", () => {
   const ctl = { ...cfg, allowedShops: ["linkup-test.myshopify.com"] };
   it("install start: allowed shop → Shopify approval with the app's Client ID and LINKUP's scopes; other shops refused", () => {

@@ -33,6 +33,9 @@ const cfg: Config = {
   claimHours: Number(Deno.env.get("LINKUP_LINK_CLAIM_HOURS") ?? "72") || 72,
   // Controlled activation: only LINKUP's development store, unless the list is changed on purpose.
   allowedShops: (Deno.env.get("LINKUP_APPS_ALLOWED_SHOPS") ?? "linkup-test.myshopify.com").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
+  // Signed UTM copy of a personal-link visit (server-side attribution without the pixel): development store only until
+  // Shopify's behaviour is proven with real orders. Widen on purpose with LINKUP_UTM_SHOPS.
+  utmShops: (Deno.env.get("LINKUP_UTM_SHOPS") ?? "linkup-test.myshopify.com").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
 };
 const MAX_BODY = 512 * 1024;
 const reply = (r: { status: number; body?: unknown; redirect?: string }, extra: Record<string, string> = {}) => r.redirect

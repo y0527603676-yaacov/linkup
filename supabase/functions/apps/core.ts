@@ -23,6 +23,7 @@ export type Config = {
   claimHours?: number;     // how long after the order a storefront purchase event may still be linked to it (default 72)
   sleep?: (ms: number) => Promise<void>;   // injectable for tests
   allowedShops?: string[]; // controlled test: only these Shopify shops may install / report orders (undefined = all)
+  utmShops?: string[];     // shops where the signed visit's UTM copy (utm_campaign + utm_content) is accepted; [] = none
 };
 export type Reply = { status: number; body?: unknown; redirect?: string };
 
@@ -108,6 +109,24 @@ export function refFromUrl(u: unknown): { code: string; at: number | null; sig: 
   const t = s.match(/[?&]lkt=(\d{9,11})(?!\d)/); const g = s.match(/[?&]lks=([A-Za-z0-9_-]{22})(?![A-Za-z0-9_-])/);
   return { code: m[1]!, at: t ? Number(t[1]) : null, sig: g ? g[1]! : null };
 }
+/** The signed visit's UTM copy, which Shopify keeps in the order's customer journey even when it drops other query
+ *  parameters: utm_campaign = creator code, utm_content = "lk1.<visit time>.<signature>". Same signature as lku/lkt/lks
+ *  (HMAC of "CODE|time"), so it can't be forged or moved to another code or time. Accepts a URL or Shopify's
+ *  UTMParameters object ({ campaign, content }). */
+export function refFromUtm(u: unknown): { code: string; at: number; sig: string } | null {
+  let campaign = "", content = "";
+  if (u && typeof u === "object") { campaign = String((u as any).campaign ?? ""); content = String((u as any).content ?? ""); }
+  else {
+    let s = String(u ?? ""); if (!s || s.length > 4000) return null;
+    for (let i = 0; i < 3; i++) { try { const d = decodeURIComponent(s.replace(/\+/g, " ")); if (d === s) break; s = d; } catch { break; } }
+    campaign = s.match(/[?&]utm_campaign=([A-Za-z0-9]{4,16})(?![A-Za-z0-9])/)?.[1] ?? "";
+    content = s.match(/[?&]utm_content=(lk1\.\d{9,11}\.[A-Za-z0-9_-]{22})(?![A-Za-z0-9_-])/)?.[1] ?? "";
+  }
+  const m = content.match(/^lk1\.(\d{9,11})\.([A-Za-z0-9_-]{22})$/);
+  if (!m || !CODE_RE.test(campaign)) return null;
+  return { code: campaign, at: Number(m[1]), sig: m[2]! };
+}
+export const utmAllowed = (cfg: Config, shop: string) => !!cfg.utmShops && (cfg.utmShops.includes("*") || cfg.utmShops.includes(shop));
 const rawFrom = (code: string, at: number | null, sig: string | null) =>
   CODE_RE.test(code) && at && at > 1e9 ? `${code}|${Math.floor(at)}${sig ? `|${sig}` : ""}` : "";
 const b64url = (b: Uint8Array) => b64(b).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -123,7 +142,8 @@ export async function acceptRef(cfg: Config, raw: string): Promise<string> {
 }
 
 export type NormalizedOrder = { id: string; status: string; currency: string; total: number; tax: number; shipping: number; shipping_tax: number;
-  coupons: string[]; ref: string; email_hash: string; created_at: string; refunds: { id: string; amount: number }[] };
+  coupons: string[]; ref: string; email_hash: string; created_at: string; refunds: { id: string; amount: number }[];
+  ref_src?: string };
 
 export function shopifyOrder(o: any, emailHash = ""): NormalizedOrder | null {
   if (o?.id == null || !o.currency) return null;
@@ -132,15 +152,16 @@ export function shopifyOrder(o: any, emailHash = ""): NormalizedOrder | null {
     : ["paid", "partially_refunded"].includes(fs) ? (o.fulfillment_status === "fulfilled" ? "completed" : "processing") : "pending";
   // 1) cart attribute set by the LINKUP theme app embed, 2) the landing page Shopify recorded for the order.
   const attr = String((o.note_attributes ?? []).find((a: any) => a?.name === "linkup_ref")?.value ?? "");
-  const land = refFromUrl(o.landing_site);
+  const land = refFromUrl(o.landing_site); const landUtm = land ? null : refFromUtm(o.landing_site);
   // Raw (possibly signed) — the webhook verifies it with acceptRef before ingestion.
-  const ref = RAW_REF_RE.test(attr) ? attr : land ? rawFrom(land.code, land.at, land.sig) : "";
+  const ref = RAW_REF_RE.test(attr) ? attr : land ? rawFrom(land.code, land.at, land.sig) : landUtm ? rawFrom(landUtm.code, landUtm.at, landUtm.sig) : "";
+  const ref_src = !ref ? "" : RAW_REF_RE.test(attr) ? "cart" : land ? "landing" : "landing_utm";
   return {
     id: String(o.id), status, currency: cur, total: toMinor(o.total_price, cur), tax: toMinor(o.total_tax, cur),
     shipping: toMinor(o.total_shipping_price_set?.shop_money?.amount, cur),
     shipping_tax: (o.shipping_lines ?? []).flatMap((l: any) => l.tax_lines ?? []).reduce((s: number, t: any) => s + toMinor(t.price, cur), 0),
     coupons: (o.discount_codes ?? []).map((d: any) => String(d?.code ?? "")).filter(Boolean),
-    ref, email_hash: emailHash,
+    ref, email_hash: emailHash, ref_src,
     created_at: o.created_at ?? new Date().toISOString(),
     refunds: (o.refunds ?? []).map((r: any) => ({ id: String(r.id), amount: (r.transactions ?? [])
       .filter((t: any) => t.kind === "refund" && t.status === "success").reduce((s: number, t: any) => s + toMinor(t.amount, cur), 0) }))
@@ -427,18 +448,28 @@ export async function shopifySyncProducts(rpc: Rpc, fetchFn: Fetch, cfg: Config,
 /** Shopify's own attribution of the order (official customerJourneySummary): last visit first, then first visit.
  *  Used only when the order has no LINKUP coupon and no link data in the webhook. Returns "" while not ready. */
 export async function shopifyJourneyRef(fetchFn: Fetch, cfg: Config, shop: string, token: string, orderId: string): Promise<string> {
+  return (await shopifyJourney(fetchFn, cfg, shop, token, orderId)).ref;
+}
+/** Same, with where the visit came from: "journey" (lku/lkt/lks kept in the landing page) or "journey_utm" (the signed
+ *  UTM copy — only for shops in cfg.utmShops until Shopify's behaviour is proven on a real store). */
+export async function shopifyJourney(fetchFn: Fetch, cfg: Config, shop: string, token: string, orderId: string): Promise<{ ref: string; src: string }> {
   // Returns a raw ref; the caller verifies it (acceptRef).
   const j = await gqlJson(fetchFn, cfg, shop, token, `query($id: ID!) { order(id: $id) { customerJourneySummary { ready
-    lastVisit { landingPage occurredAt } firstVisit { landingPage occurredAt } } } }`, { id: `gid://shopify/Order/${orderId}` });
-  const s = j?.data?.order?.customerJourneySummary; if (!s?.ready) return "";
+    lastVisit { landingPage occurredAt utmParameters { campaign content } } firstVisit { landingPage occurredAt utmParameters { campaign content } } } } }`,
+    { id: `gid://shopify/Order/${orderId}` });
+  const s = j?.data?.order?.customerJourneySummary; if (!s?.ready) return { ref: "", src: "" };
   for (const v of [s.lastVisit, s.firstVisit]) {
-    const r = refFromUrl(v?.landingPage); if (!r) continue;
-    // Signed links carry their own visit time; an unsigned landing page counts only when signing is not configured.
-    const ref = r.at && r.sig ? rawFrom(r.code, r.at, r.sig)
-      : cfg.refSecret ? "" : rawFrom(r.code, r.at ?? (v?.occurredAt ? Math.floor(Date.parse(v.occurredAt) / 1000) : null), null);
-    if (ref) return ref;
+    const r = refFromUrl(v?.landingPage);
+    if (r) {
+      // Signed links carry their own visit time; an unsigned landing page counts only when signing is not configured.
+      const ref = r.at && r.sig ? rawFrom(r.code, r.at, r.sig)
+        : cfg.refSecret ? "" : rawFrom(r.code, r.at ?? (v?.occurredAt ? Math.floor(Date.parse(v.occurredAt) / 1000) : null), null);
+      if (ref) return { ref, src: "journey" };
+    }
+    const u = utmAllowed(cfg, shop) ? (refFromUtm(v?.utmParameters) ?? refFromUtm(v?.landingPage)) : null;
+    if (u) return { ref: rawFrom(u.code, u.at, u.sig), src: "journey_utm" };
   }
-  return "";
+  return { ref: "", src: "" };
 }
 
 /** Personal links without any discount: LINKUP's app pixel (Shopify Web Pixels API) is switched on by the app itself
@@ -510,7 +541,7 @@ async function claimOrder(rpc: Rpc, cfg: Config, conn: string, eventId: string, 
   const created = Date.parse(createdAt ?? "");
   if (!n || !Number.isFinite(created)) return { status: 200, body: { ok: true, ignored: "not_an_order" } };
   if (Date.now() - created > (cfg.claimHours ?? 72) * 3600_000) return { status: 200, body: { ok: true, ignored: "claim_too_late" } };
-  n.ref = ref;
+  n.ref = ref; n.ref_src = "pixel";
   const ing = await rpc("ingest_order_event", { p_connection: conn, p_event: { event_id: eventId, type: "order.link", occurred_at: at, order: n } });
   if (ing.error) {
     if (/connection_disconnected|invalid_event/.test(ing.error.message)) return { status: 200, body: { ok: false } };
@@ -540,12 +571,17 @@ export async function shopifyWebhook(rpc: Rpc, cfg: Config, headers: { get(k: st
   const emailHash = typeof body?.email === "string" && body.email.includes("@") ? await sha256Hex(body.email.trim().toLowerCase()) : "";
   const order = shopifyOrder(body, emailHash);
   if (!order) return { status: 200, body: { ok: true, ignored: "not_an_order" } };
+  if (order.ref_src === "landing_utm" && !utmAllowed(cfg, shop)) order.ref = "";
   order.ref = order.ref ? await acceptRef(cfg, order.ref) : "";
   if (!order.ref && !order.coupons.length && fetchRaw && order.status !== "cancelled") {
     const fetchFn = retrying(fetchRaw, cfg.sleep);
     const cred = await shopifyAccess(rpc, fetchFn, cfg, c.connection_id).catch(() => null);
-    if (cred) order.ref = await acceptRef(cfg, await shopifyJourneyRef(fetchFn, cfg, cred.shop, cred.token, order.id).catch(() => ""));
+    if (cred) {
+      const jr = await shopifyJourney(fetchFn, cfg, cred.shop, cred.token, order.id).catch(() => ({ ref: "", src: "" }));
+      order.ref = await acceptRef(cfg, jr.ref); order.ref_src = order.ref ? jr.src : "";
+    }
   }
+  if (!order.ref) order.ref_src = "";
   const at = body.updated_at ?? body.created_at ?? new Date().toISOString();
   const r = await rpc("ingest_order_event", { p_connection: c.connection_id, p_event: {
     event_id: `shopify:${id || `${order.id}:${at}`}`, type: `order.${topic.replace("orders/", "")}`, occurred_at: at, order } });

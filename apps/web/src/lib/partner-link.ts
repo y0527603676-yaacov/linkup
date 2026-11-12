@@ -4,6 +4,8 @@
  *    Shopify: the order's landing page / Shopify's customer journey carries lku+lkt; the LINKUP theme app embed (when
  *    enabled) also stores it as a cart attribute. Wix: LINKUP's embedded script keeps it until Wix's Purchase event.
  *    Shopify: LINKUP's app pixel (switched on by the app at install) keeps it and reports Shopify's checkout_completed.
+ *    Shopify also keeps UTM parameters in the order's customer journey: utm_content carries the signed visit
+ *    ("lk1.<time>.<signature>") so the server can attribute without the pixel.
  *  - Only if the STORE chose it (off by default) and its creator coupon gives a discount confirmed in the shop: Shopify's
  *    official shareable discount link (/discount/CODE?redirect=…), which applies the coupon automatically. */
 import { createHmac } from "node:crypto";
@@ -26,6 +28,10 @@ export function partnerDestination(r: ResolvedLink, nowSec = Math.floor(Date.now
   landing.searchParams.set("utm_source", "linkup");
   landing.searchParams.set("utm_medium", "partner");
   landing.searchParams.set("utm_campaign", r.code);
+  // Signed copy in a UTM field: Shopify keeps UTM parameters in the order's customer journey (it drops lku/lkt/lks),
+  // so LINKUP can verify the visit on the server without the pixel. Same signature, so it can't be forged.
+  // Shopify only: links to other platforms (e.g. WooCommerce) stay exactly as before.
+  if (secret && r.platform === "shopify") landing.searchParams.set("utm_content", `lk1.${nowSec}.${signVisit(secret, r.code, nowSec)}`);
   if (r.platform === "shopify" && r.discount_link) {
     const path = `${landing.pathname}${landing.search}`;
     const d = new URL(`/discount/${encodeURIComponent(r.code)}`, site.origin);
