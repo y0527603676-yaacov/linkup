@@ -10,6 +10,8 @@ import * as core from "../../../../supabase/functions/apps/core";
  * Still required before offering it to stores: the same test on a real Shopify development store / Wix test site.
  */
 let db: Db;
+/** Simulated webhook subscriptions / pixel in the shop (shared by the fakes). */
+const HOOKS = { topics: new Set<string>(), block: new Set<string>(), pixel: false, blockPixel: false };
 const svc: Who = { role: "service_role" };
 const owner: Who = { role: "owner" };
 let u: Record<string, Who> = {}; let org: Record<string, string> = {}; let code = "";
@@ -31,11 +33,13 @@ function fakeShopify(opts: { scope?: string; shopOk?: boolean } = {}) {
   const f: core.Fetch = async (url, init) => {
     const body = init?.body ? JSON.parse(init.body) : null; calls.push({ url, body });
     const res = (status: number, j: unknown) => ({ ok: status < 400, status, json: async () => j, text: async () => JSON.stringify(j) });
-    if (url.endsWith("/admin/oauth/access_token")) return body.code === "good" ? res(200, { access_token: "shpat_x", scope: opts.scope ?? "read_orders,read_products,write_discounts,write_pixels,read_customer_events" }) : res(400, {});
+    if (url.endsWith("/admin/oauth/access_token")) return body.code === "good" ? res(200, { access_token: "shpat_x", ...(body.expiring === 1 ? { expires_in: 3600, refresh_token: "shprt_1", refresh_token_expires_in: 7776000 } : {}), scope: opts.scope ?? "read_orders,read_products,write_discounts,write_pixels,read_customer_events" }) : res(400, {});
     if (url.includes("/graphql.json")) {
       const qy: string = body.query;
       if (qy.includes("shop {")) return opts.shopOk === false ? res(401, {}) : res(200, { data: { shop: { myshopifyDomain: "demo.myshopify.com", primaryDomain: { url: "https://demo.co.il" }, currencyCode: "ILS" } } });
-      if (qy.includes("webhookSubscriptionCreate")) return res(200, { data: { webhookSubscriptionCreate: { userErrors: [] } } });
+      if (qy.includes("webhookSubscriptions(first")) return res(200, { data: { webhookSubscriptions: { nodes: [...HOOKS.topics].filter((t) => !HOOKS.block.has(t)).map((t) => ({ topic: t, uri: "https://fn.example/functions/v1/apps/shopify/webhook" })) }, webPixel: HOOKS.pixel ? { id: "gid://shopify/WebPixel/1" } : null } });
+    if (qy.includes("webhookSubscriptionCreate")) { if (!HOOKS.block.has(body.variables.topic)) HOOKS.topics.add(body.variables.topic); return res(200, { data: { webhookSubscriptionCreate: { userErrors: HOOKS.block.has(body.variables.topic) ? [{ message: "not approved for protected customer data" }] : [] } } }); }
+    if (qy.includes("webPixelCreate")) { if (!HOOKS.blockPixel) HOOKS.pixel = true; return res(200, { data: { webPixelCreate: HOOKS.blockPixel ? { webPixel: null, userErrors: [{ code: "X", message: "no" }] } : { webPixel: { id: "gid://shopify/WebPixel/1" }, userErrors: [] } } }); }
       if (qy.includes("codeDiscountNodeByCode")) { const d = discounts.get(body.variables.code); return res(200, { data: { codeDiscountNodeByCode: d ? { id: d.id, codeDiscount: { title: d.title } } : null } }); }
       if (qy.includes("discountCodeBasicCreate")) { discounts.set(body.variables.d.code, { id: `gid://${body.variables.d.code}`, title: body.variables.d.title }); return res(200, { data: { discountCodeBasicCreate: { codeDiscountNode: { id: `gid://${body.variables.d.code}` }, userErrors: [] } } }); }
     }
@@ -98,7 +102,7 @@ describe("Shopify: install with the owner's approval", () => {
     expect(s.calls.filter((x) => x.body?.query?.includes("webhookSubscriptionCreate")).map((x) => x.body.variables.topic)).toEqual(core.SHOPIFY_TOPICS);
     expect(s.discounts.has(code)).toBe(true);
     expect((await q(`select active from app_coupons where code = upper($1)`, [code]))[0]?.active).toBe(true);   // confirmed in the shop
-    expect((await q(`select s.secret from vault.secrets s join store_app_credentials c on c.token_secret = s.id where c.shop = 'demo.myshopify.com'`))[0].secret).toBe("shpat_x");
+    expect((await q(`select s.secret from vault.secrets s join store_app_credentials c on c.token_secret = s.id where c.shop = 'demo.myshopify.com'`))[0].secret).toMatch(/^\{"a":"shpat_x","r":"shprt_1","e":\d+,"re":\d+\}$/);   // expiring token + refresh token
     expect(await call(u.store!, "tracking_mode", { p_store: org.store })).toBe("automatic");
     // the same state cannot be used twice
     expect((await core.shopifyCallback(rpc, s.f, cfg, signQuery({ code: "good", shop: "demo.myshopify.com", state, timestamp: "2" }))).redirect).toContain("error=invalid_state");

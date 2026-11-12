@@ -1,5 +1,6 @@
 // LINKUP ↔ Shopify / Wix apps. Deployed with verify_jwt = false: every route authenticates itself.
 //   GET  /apps/shopify/install    Start: adds the Client ID and sends the owner to Shopify's approval screen
+//   GET  /apps/shopify/open       Opened from Shopify admin (signed): finish a missing connection with one click
 //   GET  /apps/shopify/callback   Shopify OAuth redirect (HMAC-verified query + one-time LINKUP state)
 //   POST /apps/shopify/webhook    Shopify webhooks (X-Shopify-Hmac-Sha256), incl. mandatory privacy webhooks
 //   GET  /apps/wix/callback       Wix install redirect (instanceId + one-time LINKUP state)
@@ -11,7 +12,7 @@
 // also needs its own credentials (SHOPIFY_API_KEY / SHOPIFY_API_SECRET, WIX_APP_ID / WIX_APP_SECRET / WIX_PUBLIC_KEY)
 // plus LINKUP_REF_SECRET for personal links. Secrets live only in Supabase function secrets — never in code or logs.
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { shopifyCallback, shopifyInstall, shopifyRef, shopifyWebhook, syncAll, wixCallback, wixRef, wixWebhook, type Config, type Rpc } from "./core.ts";
+import { shopifyCallback, shopifyInstall, shopifyOpen, shopifyRef, shopifyWebhook, syncAll, wixCallback, wixRef, wixWebhook, type Config, type Rpc } from "./core.ts";
 
 const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
   auth: { persistSession: false, autoRefreshToken: false },
@@ -51,6 +52,7 @@ Deno.serve(async (req) => {
   if (path.startsWith("wix/") && !wixReady) return off();
   if (path.endsWith("/ref") && !cfg.refSecret) return off();   // personal links require signed visits
   if (req.method === "GET" && path === "shopify/install") return reply(shopifyInstall(cfg, url.searchParams));
+  if (req.method === "GET" && path === "shopify/open") return reply(await shopifyOpen(rpc, cfg, url.searchParams));
   if (req.method === "GET" && path === "shopify/callback") return reply(await shopifyCallback(rpc, fetch, cfg, url.searchParams));
   if (req.method === "GET" && path === "wix/callback") return reply(await wixCallback(rpc, fetch, cfg, url.searchParams));
   if (req.method === "OPTIONS" && (path === "wix/ref" || path === "shopify/ref")) return new Response(null, { status: 204, headers: CORS });

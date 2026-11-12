@@ -553,6 +553,8 @@ export async function startAppInstall(form: FormData) {
   if (error) fail(errorCode(error));
   const fnBase = appsFunctionBase();
   if (platform === "shopify") {
+    // Remember the started install for 30 minutes, so an install that never came back can be continued in one tap.
+    (await cookies()).set("lk_app_pending", JSON.stringify({ org, shop, at: Date.now() }), { httpOnly: true, sameSite: "lax", path: "/app", maxAge: 1800, secure: !process.env.LINKUP_LOCAL_HTTP });
     // The edge function adds the app's Client ID (kept in function secrets) and sends the owner to Shopify's approval.
     redirect(shopifyInstallStart(shop, String(data)));
   }

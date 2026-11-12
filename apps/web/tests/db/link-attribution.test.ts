@@ -11,6 +11,8 @@ import { partnerDestination, signVisit } from "../../src/lib/partner-link";
  * customerJourneySummary as documented, that the theme app embed and Wix embedded script run on real storefronts.
  */
 let db: Db;
+/** Simulated webhook subscriptions / pixel in the shop (shared by the fakes). */
+const HOOKS = { topics: new Set<string>(), block: new Set<string>(), pixel: false, blockPixel: false };
 const svc: Who = { role: "service_role" };
 const owner: Who = { role: "owner" };
 const anon: Who = { role: "anon" };
@@ -52,7 +54,9 @@ function fakeShopify() {
     const qy: string = body.query; st.calls.push(qy.slice(0, 40));
     if (st.fail429 > 0) { st.fail429--; return res(429, {}); }
     if (qy.includes("shop {")) return st.shopStatus === 200 ? res(200, { data: { shop: { myshopifyDomain: "linkshop.myshopify.com", primaryDomain: { url: "https://linkshop.co.il" }, currencyCode: "ILS" } } }) : res(st.shopStatus, {});
-    if (qy.includes("webhookSubscriptionCreate")) return res(200, { data: { webhookSubscriptionCreate: { userErrors: [] } } });
+    if (qy.includes("webhookSubscriptions(first")) return res(200, { data: { webhookSubscriptions: { nodes: [...HOOKS.topics].filter((t) => !HOOKS.block.has(t)).map((t) => ({ topic: t, uri: "https://fn.example/functions/v1/apps/shopify/webhook" })) }, webPixel: HOOKS.pixel ? { id: "gid://shopify/WebPixel/1" } : null } });
+    if (qy.includes("webhookSubscriptionCreate")) { if (!HOOKS.block.has(body.variables.topic)) HOOKS.topics.add(body.variables.topic); return res(200, { data: { webhookSubscriptionCreate: { userErrors: HOOKS.block.has(body.variables.topic) ? [{ message: "not approved for protected customer data" }] : [] } } }); }
+    if (qy.includes("webPixelCreate")) { if (!HOOKS.blockPixel) HOOKS.pixel = true; return res(200, { data: { webPixelCreate: HOOKS.blockPixel ? { webPixel: null, userErrors: [{ code: "X", message: "no" }] } : { webPixel: { id: "gid://shopify/WebPixel/1" }, userErrors: [] } } }); }
     if (qy.includes("codeDiscountNodeByCode")) { const d = st.discounts.get(body.variables.code); return res(200, { data: { codeDiscountNodeByCode: d ? { id: d.id, codeDiscount: { title: d.title, status: d.status } } : null } }); }
     if (qy.includes("discountCodeBasicCreate")) { const id = `gid://shopify/DiscountCodeNode/${st.discounts.size + 1}`;
       st.discounts.set(body.variables.d.code, { id, title: body.variables.d.title, status: "ACTIVE" });
@@ -276,6 +280,85 @@ describe("Controlled activation: only the allowed test shop", () => {
     expect(shopifyAppOffered("linkup-test.myshopify.com")).toBe(true);
     expect(shopifyAppOffered("someone.myshopify.com")).toBe(false);
     expect(SHOPIFY_SCOPES.split(",")).toEqual(core.SHOPIFY_SCOPES);
+  });
+});
+
+describe("Shopify reliability: expiring tokens, real component check, partial state, recovery", () => {
+  it("tokens: stored with refresh token; refreshed shortly before expiry; rotated refresh token saved; old plain tokens still work", async () => {
+    const t = core.parseToken(core.packToken({ a: "A1", r: "R1", e: 1000, re: 9000 }))!;
+    expect(t).toEqual({ a: "A1", r: "R1", e: 1000, re: 9000 });
+    expect(core.parseToken("shpat_plain")).toEqual({ a: "shpat_plain" });
+    expect(core.parseToken("revoked")).toBeNull();
+    await call(svc, "app_save_token", { p_connection: conn, p_token: core.packToken({ a: "OLD", r: "R1", e: now() + 60, re: now() + 86400 }) });
+    let refreshCalls = 0;
+    const f: core.Fetch = async (url, init) => {
+      const b = init?.body ? JSON.parse(init.body) : {};
+      if (url.endsWith("/admin/oauth/access_token") && b.grant_type === "refresh_token") {
+        refreshCalls++; await new Promise((r) => setTimeout(r, 20));
+        return b.refresh_token === "R1" ? res(200, { access_token: "NEW", expires_in: 3600, refresh_token: "R2", refresh_token_expires_in: 7776000 }) : res(400, {});
+      }
+      return shop.f(url, init);
+    };
+    const [x, y] = await Promise.all([core.shopifyAccess(rpc, f, cfg, conn), core.shopifyAccess(rpc, f, cfg, conn)]);
+    expect([x?.token, y?.token]).toEqual(["NEW", "NEW"]);
+    expect(refreshCalls).toBe(1);                       // parallel requests share one refresh
+    const saved = core.parseToken((await call(svc, "app_credentials", { p_connection: conn })).token)!;
+    expect(saved).toMatchObject({ a: "NEW", r: "R2" });
+    expect((await core.shopifyAccess(rpc, f, cfg, conn))?.token).toBe("NEW");   // still valid → no refresh
+    expect(refreshCalls).toBe(1);
+  });
+  it("refresh fails but another instance already refreshed → uses the newer stored token; nothing valid → recorded, no token", async () => {
+    await call(svc, "app_save_token", { p_connection: conn, p_token: core.packToken({ a: "STALE", r: "USED", e: now() + 10, re: now() + 86400 }) });
+    const f: core.Fetch = async (url, init) => {
+      if (url.endsWith("/admin/oauth/access_token")) {   // simulate: another instance refreshed just before us
+        await call(svc, "app_save_token", { p_connection: conn, p_token: core.packToken({ a: "FROM_OTHER", r: "R9", e: now() + 3600, re: now() + 86400 }) });
+        return res(400, { error: "invalid_grant" });
+      }
+      return shop.f(url, init);
+    };
+    expect((await core.shopifyAccess(rpc, f, cfg, conn))?.token).toBe("FROM_OTHER");
+    await call(svc, "app_save_token", { p_connection: conn, p_token: core.packToken({ a: "STALE", r: "BAD", e: now() + 10, re: now() + 86400 }) });
+    const g: core.Fetch = async (url, init) => (url.endsWith("/admin/oauth/access_token") ? res(400, {}) : shop.f(url, init));
+    expect(await core.shopifyAccess(rpc, g, cfg, conn)).toBeNull();
+    expect((await q(`select last_error from store_connections where id = $1`, [conn]))[0].last_error).toBe("app_sync: token_refresh_failed");
+    await call(svc, "app_save_token", { p_connection: conn, p_token: core.packToken({ a: "shpat_x", r: "R1", e: now() + 3600, re: now() + 86400 }) });
+  });
+  it("order webhooks refused by Shopify (no protected-data access) → partial, NOT connected, no success message", async () => {
+    const st = await call(u.other!, "create_organization", { p_type: "store", p_name: "Partial Shop" });
+    const state = await call(u.other!, "start_app_install", { p_org: st, p_platform: "shopify", p_shop: "partialshop.myshopify.com" });
+    HOOKS.topics.clear(); HOOKS.pixel = false; HOOKS.block = new Set(["ORDERS_CREATE", "ORDERS_UPDATED", "ORDERS_CANCELLED"]);
+    const r = await core.shopifyCallback(rpc, shop.f, cfg, signQuery({ code: "c", shop: "partialshop.myshopify.com", state, timestamp: "1" }));
+    expect(r.redirect).toContain("error=app_partial");
+    expect(r.redirect).not.toContain("app_connected");
+    const c = (await q(`select status, last_error from store_connections where org_id = $1`, [st]))[0];
+    expect(c).toEqual({ status: "pending", last_error: "app_sync: partial:orders_create,orders_updated,orders_cancelled" });
+    expect((await q(`select founders_until from organizations where id = $1`, [st]))[0].founders_until).toBeNull();   // clock not started
+    // Access granted later → "complete the connection" (same OAuth again, no uninstall) → only what was missing is created
+    HOOKS.block.clear();
+    const state2 = await call(u.other!, "start_app_install", { p_org: st, p_platform: "shopify", p_shop: "partialshop.myshopify.com" });
+    const before = HOOKS.topics.size;
+    const r2 = await core.shopifyCallback(rpc, shop.f, cfg, signQuery({ code: "c", shop: "partialshop.myshopify.com", state: state2, timestamp: "1" }));
+    expect(r2.redirect).toContain("ok=app_connected");
+    expect(HOOKS.topics.size).toBe(before + 3);
+    expect((await q(`select status, last_error from store_connections where org_id = $1`, [st]))[0]).toEqual({ status: "connected", last_error: null });
+  });
+  it("components that already exist are not created again", async () => {
+    HOOKS.topics = new Set(core.SHOPIFY_TOPICS); HOOKS.pixel = true; let creates = 0;
+    const f: core.Fetch = async (url, init) => { if (init?.body?.includes("webhookSubscriptionCreate")) creates++; return shop.f(url, init); };
+    expect(await core.shopifyEnsureComponents(f, cfg, "linkshop.myshopify.com", "t")).toEqual([]);
+    expect(creates).toBe(0);
+  });
+  it("opened from Shopify admin (signed): missing connection → LINKUP connect page to finish; unsigned → ignored", async () => {
+    const ts = String(now());
+    const ok = await core.shopifyOpen(rpc, cfg, signQuery({ shop: "newshop.myshopify.com", timestamp: ts, host: "x" }));
+    expect(ok.redirect).toBe("https://app.example/app/connect?resume=newshop.myshopify.com");
+    const linked = await core.shopifyOpen(rpc, cfg, signQuery({ shop: "linkshop.myshopify.com", timestamp: ts, host: "x" }));
+    expect(linked.redirect).toBe(`https://app.example/app/connect?org=${org.store}`);
+    const forged = new URLSearchParams({ shop: "newshop.myshopify.com", timestamp: ts, hmac: "00" });
+    expect((await core.shopifyOpen(rpc, cfg, forged)).redirect).toBe("https://app.example/app");
+    const old = await core.shopifyOpen(rpc, cfg, signQuery({ shop: "newshop.myshopify.com", timestamp: String(now() - 3600) }));
+    expect(old.redirect).toBe("https://app.example/app");
+    expect((await core.shopifyOpen(rpc, { ...cfg, allowedShops: ["linkup-test.myshopify.com"] }, signQuery({ shop: "newshop.myshopify.com", timestamp: ts }))).redirect).toBe("https://app.example/app");
   });
 });
 

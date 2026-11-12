@@ -3,7 +3,9 @@ import { loadApp } from "@/lib/orgs";
 import { errorText, shortDate } from "@/lib/format";
 import { ConnectForm } from "./ConnectForm";
 import { LegalChecks, type PendingDoc } from "@/components/LegalChecks";
-import { shopifyAppOffered } from "@/lib/app-test-shops";
+import { appsFunctionBase, shopifyAppOffered } from "@/lib/app-test-shops";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { startWooApi, syncWooApi, startWpConnect, disconnectStore, detectStoreAction, startAppInstall } from "../actions";
 
 /** Platform apps are offered to stores only after a real end-to-end test (set per platform on the server). */
@@ -14,6 +16,11 @@ import { detectOpts } from "@/lib/detect-env";
 
 export default async function Connect({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const sp = await searchParams;
+  // Opened from Shopify admin (the app's App URL, signed by Shopify): the edge function verifies the signature.
+  if (sp.hmac && sp.shop && sp.timestamp) {
+    const q = new URLSearchParams(Object.entries(sp).filter((e): e is [string, string] => typeof e[1] === "string"));
+    redirect(`${appsFunctionBase()}/shopify/open?${q}`);
+  }
   const ctx = await loadApp(sp, "store");
   const { sb, org, t, locale } = ctx;
   const l = t.connect;
@@ -31,6 +38,19 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
   const site = c?.site_url ?? o?.website_url ?? "";
   const api = apiOpen === true;
   const connected = c?.status === "connected";
+  // Shopify app: partial connection (a required component missing), an install that never came back, or opened from
+  // Shopify with no finished connection → one clear card with one button that repeats the approval (no reinstall).
+  const appShop = c?.method === "app" && c.platform === "shopify" ? (c.site_url.match(/^https:\/\/([a-z0-9-]+\.myshopify\.com)$/)?.[1] ?? null) : null;
+  const appPartial = !!appShop && !!c?.last_error?.startsWith("app_sync: partial");
+  let pending: { org?: string; shop?: string; at?: number } | null = null;
+  try { pending = JSON.parse((await cookies()).get("lk_app_pending")?.value ?? "null"); } catch { pending = null; }
+  const pendShop = pending?.org === org.id && typeof pending.shop === "string" && shopifyAppOffered(pending.shop)
+    && !(connected && appShop === pending.shop && !appPartial) && sp.ok !== "app_connected" && sp.error !== "app_partial" ? pending.shop : null;
+  const resumeShop = typeof sp.resume === "string" && shopifyAppOffered(sp.resume) && !(connected && appShop === sp.resume && !appPartial) ? sp.resume : null;
+  const appFinish = appPartial ? { shop: appShop!, title: t.uc.app.partialT, text: t.uc.app.partialD, cta: t.uc.app.finish }
+    : resumeShop ? { shop: resumeShop, title: t.uc.app.resumeT, text: t.uc.app.resumeD.replace("{shop}", resumeShop), cta: t.uc.app.finish }
+    : pendShop ? { shop: pendShop, title: t.uc.app.pendingT, text: t.uc.app.pendingD.replace("{shop}", pendShop), cta: t.uc.app.cont }
+    : null;
   const wpAvail = wpOpen === true;
   const w = l.wp;
   const f = l.flow;
@@ -55,6 +75,7 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
   // Measurement (host only): what was detected, and why a connection could not continue.
   if (d) {
     const fail = !d.ok ? d.error : rdFrom ? "redirected" : platform === "wordpress" ? "no_woocommerce"
+      : (platform === "shopify" && (APP_ON.shopify || shopifyAppOffered(d.shopifyDomain))) || (platform === "wix" && APP_ON.wix) ? null   // app connection offered
       : ["shopify", "wix", "magento"].includes(platform) ? "unsupported_platform" : wantManual && adminOk === false ? "no_wp_admin" : null;
     await sb.rpc("log_connect_event", { p_org: org.id, p_event: "detected", p_site: d.url || checkSite, p_platform: d.ok ? platform : null });
     if (fail) await sb.rpc("log_connect_event", { p_org: org.id, p_event: "failed", p_site: d.url || checkSite, p_platform: d.ok ? platform : null, p_reason: fail });
@@ -97,6 +118,18 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
         {sp.ok === "sync" && <Alert kind="ok" text={l.syncStarted} />}
         {sp.ok === "disconnected" && <Alert kind="ok" text={l.disconnect.ok} />}
         {sp.ok === "app_connected" && <Alert kind="ok" text={u.app.connected} />}
+        {appFinish && (
+          <div className="card card-flat stack" style={{ marginBottom: 16, gap: 8 }} data-testid="app-finish">
+            <b>{appFinish.title}</b>
+            <p style={{ margin: 0 }}>{appFinish.text}</p>
+            <form action={startAppInstall} className="stack">
+              <input type="hidden" name="org" value={org.id} /><input type="hidden" name="platform" value="shopify" />
+              <input type="hidden" name="shop" value={appFinish.shop} /><input type="hidden" name="site" value={`https://${appFinish.shop}`} />
+              <LegalChecks docs={legal} locale={locale} label={t.lc.store} />
+              <button className="btn btn-primary btn-block">{appFinish.cta}</button>
+            </form>
+          </div>
+        )}
         {wpResult === "connected" && <Alert kind="ok" text={w.done} />}
         {wpResult && wpResult !== "connected" && <Alert text={wpResult === "not_in_directory" ? `${w.errors.not_in_directory} ${w.uploadThen}` : (w.errors[wpResult] ?? w.errors.other)} />}
         {sp.wpr === "0" && <Alert text={w.notRevoked} />}
@@ -104,12 +137,12 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
         {c && (
           <div className="card card-flat stack" style={{ marginBottom: 16, gap: 6 }}>
             <p className="row" style={{ margin: 0 }}><span className={`dot${connected && !c.last_error ? "" : " dot-off"}`} /><b>{t.dash.connection[c.status]}</b> · <span className="ltr">{c.site_url}</span></p>
-            <p className="small muted" style={{ margin: 0 }}>{c.method === "api" ? l.viaApi : c.method === "signed_api" ? u.viaCustom : l.viaPlugin}
+            <p className="small muted" style={{ margin: 0 }}>{c.method === "api" ? l.viaApi : c.method === "signed_api" ? u.viaCustom : c.method === "app" ? u.app.viaApp : l.viaPlugin}
               {c.last_sync_at ? ` · ${t.dash.connection.lastSync}: ${shortDate(c.last_sync_at, locale)}` : ""}
               {c.method === "plugin" && c.plugin_version ? ` · v${c.plugin_version}` : ""}</p>
             {c.method === "signed_api" && <a className="btn btn-ghost btn-sm" href={`/app/connect/api?org=${org.id}`}>{u.toApi}</a>}
             {c.status === "connected" && <a className="small" href={`/app/claims?org=${org.id}`}>{u.claims.title}</a>}
-            {c.last_error && <p className="alert alert-warn small" style={{ margin: 0 }}>{l.errors[c.last_error] ?? l.errors.other}</p>}
+            {c.last_error && !appPartial && <p className="alert alert-warn small" style={{ margin: 0 }}>{l.errors[c.last_error] ?? l.errors.other}</p>}
             {c.method === "api" && c.status !== "disconnected" && (
               <form action={syncWooApi}><input type="hidden" name="org" value={org.id} /><button className="btn btn-ghost btn-sm">{l.syncNow}</button></form>
             )}

@@ -185,6 +185,52 @@ const gqlJson = async (fetchFn: Fetch, cfg: Config, shop: string, token: string,
   return r.ok ? await r.json().catch(() => null) : null;
 };
 
+/* ---------- Shopify access tokens: expiring offline tokens (required for public apps created from 1.4.2026) ----------
+ * Stored in the existing Vault secret as JSON {"a": access, "r": refresh, "e": access expiry (unix s), "re": refresh
+ * expiry}. A plain string is an older non-expiring token and keeps working as before. "revoked" = uninstalled. */
+export type ShopToken = { a: string; r?: string; e?: number; re?: number };
+export function parseToken(raw: unknown): ShopToken | null {
+  const s = String(raw ?? ""); if (!s || s === "revoked") return null;
+  if (s.startsWith("{")) { try { const t = JSON.parse(s); return t && typeof t.a === "string" && t.a ? t : null; } catch { return null; } }
+  return { a: s };
+}
+export const packToken = (t: ShopToken) => JSON.stringify(t);
+function tokenFromResponse(j: any, nowSec: number): ShopToken | null {
+  if (!j?.access_token) return null;
+  return j.refresh_token
+    ? { a: j.access_token, r: j.refresh_token, e: nowSec + Number(j.expires_in ?? 3600), re: nowSec + Number(j.refresh_token_expires_in ?? 7776000) }
+    : { a: j.access_token };
+}
+const refreshing = new Map<string, Promise<string | null>>();   // one refresh per connection at a time in this instance
+/** A valid access token for the shop: refreshed shortly before it expires. If the refresh fails (e.g. another instance
+ *  already used the refresh token), the stored credentials are read again and a newer valid token is used. */
+export async function shopifyAccess(rpc: Rpc, fetchFn: Fetch, cfg: Config, conn: string, now = () => Math.floor(Date.now() / 1000)):
+  Promise<{ shop: string; token: string } | null> {
+  const read = async () => {
+    const c = (await rpc("app_credentials", { p_connection: conn })).data as { shop: string; token: string } | null;
+    return c ? { shop: c.shop, t: parseToken(c.token) } : null;
+  };
+  const c = await read(); if (!c?.t) return null;
+  if (!c.t.e || c.t.e - now() > 300) return { shop: c.shop, token: c.t.a };
+  if (!c.t.r) return null;
+  let p = refreshing.get(conn);
+  if (!p) {
+    p = (async () => {
+      const r = await fetchFn(`https://${c.shop}/admin/oauth/access_token`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client_id: cfg.shopifyKey, client_secret: cfg.shopifySecret, grant_type: "refresh_token", refresh_token: c.t!.r }) });
+      const t = r.ok ? tokenFromResponse(await r.json().catch(() => null), now()) : null;
+      if (t) { await rpc("app_save_token", { p_connection: conn, p_token: packToken(t) }); return t.a; }
+      const again = await read();   // someone else may have refreshed in the meantime
+      if (again?.t && again.t.a !== c.t!.a && (!again.t.e || again.t.e - now() > 60)) return again.t.a;
+      await rpc("app_sync_failed", { p_connection: conn, p_reason: "token_refresh_failed" });
+      return null;
+    })().finally(() => refreshing.delete(conn));
+    refreshing.set(conn, p);
+  }
+  const token = await p;
+  return token ? { shop: c.shop, token } : null;
+}
+
 export function shopifyInstallUrl(cfg: Config, shop: string, state: string): string | null {
   if (!SHOP_RE.test(shop) || !cfg.shopifyKey) return null;
   const q = new URLSearchParams({ client_id: cfg.shopifyKey, scope: SHOPIFY_SCOPES.join(","), redirect_uri: `${cfg.functionsBase}/shopify/callback`, state });
@@ -216,49 +262,85 @@ export async function shopifyCallback(rpc: Rpc, fetchRaw: Fetch, cfg: Config, pa
   if (!shopAllowed(cfg, shop)) return { status: 302, redirect: back(cfg, { error: "shop_not_allowed" }) };
   const tr = await fetchFn(`https://${shop}/admin/oauth/access_token`, {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ client_id: cfg.shopifyKey, client_secret: cfg.shopifySecret, code }),
+    body: JSON.stringify({ client_id: cfg.shopifyKey, client_secret: cfg.shopifySecret, code, expiring: 1 }),
   });
   if (!tr.ok) return { status: 302, redirect: back(cfg, { error: "app_install_failed" }) };
-  const tok = await tr.json() as { access_token?: string; scope?: string };
+  const tok = await tr.json() as { access_token?: string; scope?: string; refresh_token?: string; expires_in?: number };
   const granted = new Set(String(tok.scope ?? "").split(",").map((s) => s.trim()));
   if (!tok.access_token || !SHOPIFY_SCOPES.every((s) => granted.has(s) || (s.startsWith("read_") && granted.has(s.replace("read_", "write_"))))) {
     return { status: 302, redirect: back(cfg, { error: "app_scopes_missing" }) };
   }
-  const done = await rpc("complete_app_install", { p_state: state, p_platform: "shopify", p_shop: shop, p_token: tok.access_token,
+  const stored = tokenFromResponse(tok, Math.floor(Date.now() / 1000))!;
+  const done = await rpc("complete_app_install", { p_state: state, p_platform: "shopify", p_shop: shop, p_token: packToken(stored),
     p_refresh: null, p_scopes: tok.scope ?? "", p_site_url: null });
   if (done.error) return { status: 302, redirect: back(cfg, { error: done.error.message.match(/[a-z_]{6,}/)?.[0] ?? "app_install_failed" }) };
   const { connection_id: conn, org_id: org } = done.data as { connection_id: string; org_id: string };
-  const verified = await shopifyActivate(rpc, fetchFn, cfg, conn);
-  return { status: 302, redirect: back(cfg, verified ? { org, ok: "app_connected" } : { org, error: "app_not_verified" }) };
+  const r = await shopifyActivate(rpc, fetchFn, cfg, conn);
+  return { status: 302, redirect: back(cfg, r.ok ? { org, ok: "app_connected" } : r.partial ? { org, error: "app_partial" } : { org, error: "app_not_verified" }) };
 }
 
-/** Real API call to the shop; only after it succeeds is the store "connected" (plugin_sync), then coupons are synced. */
-async function shopifyVerifyAndSync(rpc: Rpc, fetchFn: Fetch, cfg: Config, conn: string, withProducts: boolean) {
-  const c = (await rpc("app_credentials", { p_connection: conn })).data as { shop: string; token: string } | null;
-  if (!c || !c.token || c.token === "revoked") return { ok: false as const, reason: "no_credentials" };
-  const j = await gqlJson(fetchFn, cfg, c.shop, c.token, "{ shop { myshopifyDomain primaryDomain { url } currencyCode } }");
-  if (!j?.data?.shop?.myshopifyDomain) return { ok: false as const, reason: "shop_unreachable", c };
-  const sync = await rpc("plugin_sync", { p_connection: conn, p_plugin_version: "shopify-app" });
-  if (sync.error) return { ok: false as const, reason: "sync_failed", c };
-  const coupons = await shopifySyncCoupons(fetchFn, cfg, c.shop, c.token, (sync.data?.coupons ?? []) as Coupon[],
-    (code, id, active) => rpc("app_coupon_mark", { p_connection: conn, p_code: code, p_external_id: id, p_active: active }).then(() => undefined));
-  const products = withProducts ? await shopifySyncProducts(rpc, fetchFn, cfg, conn, c.shop, c.token) : null;
-  return { ok: true as const, c, coupons, products };
-}
-
-export async function shopifyActivate(rpc: Rpc, fetchFn: Fetch, cfg: Config, conn: string): Promise<boolean> {
-  const c = (await rpc("app_credentials", { p_connection: conn })).data as { shop: string; token: string } | null;
-  if (!c) return false;
-  const j = await gqlJson(fetchFn, cfg, c.shop, c.token, "{ shop { myshopifyDomain primaryDomain { url } currencyCode } }");
-  if (!j?.data?.shop?.myshopifyDomain) return false;
+/** What must exist in the shop for orders, cancellations, refunds, uninstall and personal links to work. */
+export const SHOPIFY_REQUIRED = [...SHOPIFY_TOPICS, "PIXEL"] as const;
+/** Reads what really exists in the shop (webhook subscriptions to LINKUP, LINKUP's pixel) and creates what is missing.
+ *  An existing subscription counts; nothing else in the shop is touched. Returns the components still missing. */
+export async function shopifyEnsureComponents(fetchFn: Fetch, cfg: Config, shop: string, token: string): Promise<string[] | null> {
+  const hook = `${cfg.functionsBase}/shopify/webhook`;
+  const list = async () => {
+    const j = await gqlJson(fetchFn, cfg, shop, token, "{ webhookSubscriptions(first: 100) { nodes { topic uri } } webPixel { id } }");
+    if (!j?.data) return null;
+    const topics = new Set<string>((j.data.webhookSubscriptions?.nodes ?? []).filter((n: any) => n?.uri === hook).map((n: any) => String(n.topic)));
+    return { topics, pixel: !!j.data.webPixel?.id };
+  };
+  const before = await list(); if (!before) return null;
   for (const topic of SHOPIFY_TOPICS) {
-    await gql(fetchFn, cfg, c.shop, c.token,
+    if (before.topics.has(topic)) continue;
+    await gql(fetchFn, cfg, shop, token,
       `mutation($topic: WebhookSubscriptionTopic!, $url: URL!) { webhookSubscriptionCreate(topic: $topic, webhookSubscription: { callbackUrl: $url, format: JSON }) { userErrors { message } } }`,
-      { topic, url: `${cfg.functionsBase}/shopify/webhook` });
+      { topic, url: hook });
   }
-  await shopifyEnsurePixel(fetchFn, cfg, c.shop, c.token);
-  const r = await shopifyVerifyAndSync(rpc, fetchFn, cfg, conn, true);
-  return r.ok;
+  await shopifyEnsurePixel(fetchFn, cfg, shop, token);   // creates it, or refreshes its settings
+  const after = await list(); if (!after) return null;
+  return [...SHOPIFY_TOPICS.filter((t) => !after.topics.has(t)), ...(after.pixel ? [] : ["PIXEL"])];
+}
+
+/** Real API call to the shop and a real check of every component; only when all exist is the store "connected"
+ *  (plugin_sync). Otherwise the connection is marked partial (shown to the owner with "complete the connection"). */
+async function shopifyVerifyAndSync(rpc: Rpc, fetchFn: Fetch, cfg: Config, conn: string, withProducts: boolean) {
+  const acc = await shopifyAccess(rpc, fetchFn, cfg, conn);
+  if (!acc) return { ok: false as const, partial: false, reason: "no_credentials" };
+  const j = await gqlJson(fetchFn, cfg, acc.shop, acc.token, "{ shop { myshopifyDomain primaryDomain { url } currencyCode } }");
+  if (!j?.data?.shop?.myshopifyDomain) return { ok: false as const, partial: false, reason: "shop_unreachable" };
+  const missing = await shopifyEnsureComponents(fetchFn, cfg, acc.shop, acc.token);
+  if (missing === null) return { ok: false as const, partial: false, reason: "shop_unreachable" };
+  if (missing.length) {
+    await rpc("app_sync_failed", { p_connection: conn, p_reason: `partial:${missing.join(",").toLowerCase()}` });
+    return { ok: false as const, partial: true, reason: "partial", missing };
+  }
+  const sync = await rpc("plugin_sync", { p_connection: conn, p_plugin_version: "shopify-app" });
+  if (sync.error) return { ok: false as const, partial: false, reason: "sync_failed" };
+  const coupons = await shopifySyncCoupons(fetchFn, cfg, acc.shop, acc.token, (sync.data?.coupons ?? []) as Coupon[],
+    (code, id, active) => rpc("app_coupon_mark", { p_connection: conn, p_code: code, p_external_id: id, p_active: active }).then(() => undefined));
+  const products = withProducts ? await shopifySyncProducts(rpc, fetchFn, cfg, conn, acc.shop, acc.token) : null;
+  return { ok: true as const, partial: false, coupons, products };
+}
+
+export async function shopifyActivate(rpc: Rpc, fetchFn: Fetch, cfg: Config, conn: string) {
+  return shopifyVerifyAndSync(rpc, fetchFn, cfg, conn, true);
+}
+
+/** Opened from Shopify (the app's App URL with Shopify's signed query): if this shop has no working LINKUP connection,
+ *  send the owner to LINKUP's connect page to finish it with one click (a new one-time state is created there for the
+ *  signed-in owner). Unsigned or foreign requests are ignored. */
+export async function shopifyOpen(rpc: Rpc, cfg: Config, params: URLSearchParams): Promise<Reply> {
+  const shop = (params.get("shop") ?? "").toLowerCase();
+  if (!SHOP_RE.test(shop) || !(await verifyShopifyQuery(params, cfg.shopifySecret ?? "")) || !shopAllowed(cfg, shop))
+    return { status: 302, redirect: `${cfg.appBase}/app` };
+  const ts = Number(params.get("timestamp") ?? 0);
+  if (!ts || Math.abs(Date.now() / 1000 - ts) > 600) return { status: 302, redirect: `${cfg.appBase}/app` };
+  const cr = await rpc("app_connection_by_shop", { p_platform: "shopify", p_shop: shop });
+  const c = cr.data as { connection_id: string; org_id: string; status: string } | null;
+  if (c && c.status === "connected") return { status: 302, redirect: `${cfg.appBase}/app/connect?${new URLSearchParams({ org: c.org_id })}` };
+  return { status: 302, redirect: `${cfg.appBase}/app/connect?${new URLSearchParams({ ...(c ? { org: c.org_id } : {}), resume: shop })}` };
 }
 
 type Coupon = { code: string; discount_pct: number; active: boolean };
@@ -391,9 +473,10 @@ export async function shopifyRef(rpc: Rpc, fetchRaw: Fetch, cfg: Config, raw: st
   if (cr.error) return { status: 500, body: { error: "temporary_error" } };
   const c = cr.data as { connection_id: string; status: string } | null;
   if (!c || c.status === "disconnected") return { status: 200, body: { ok: true, ignored: "unknown_shop" } };
-  const cred = (await rpc("app_credentials", { p_connection: c.connection_id })).data as { shop: string; token: string } | null;
-  if (!cred?.token || cred.token === "revoked") return { status: 200, body: { ok: true, ignored: "unknown_shop" } };
-  const j = await gqlJson(retrying(fetchRaw, cfg.sleep), cfg, cred.shop, cred.token, SHOP_ORDER_QUERY, { id: `gid://shopify/Order/${orderId}` });
+  const fetchFn = retrying(fetchRaw, cfg.sleep);
+  const cred = await shopifyAccess(rpc, fetchFn, cfg, c.connection_id);
+  if (!cred) return { status: 500, body: { error: "temporary_error" } };
+  const j = await gqlJson(fetchFn, cfg, cred.shop, cred.token, SHOP_ORDER_QUERY, { id: `gid://shopify/Order/${orderId}` });
   if (!j) return { status: 500, body: { error: "temporary_error" } };
   const o = j.data?.order;
   if (!o) return { status: 409, body: { error: "order_not_ready" } };   // the pixel retries a few times
@@ -438,9 +521,9 @@ export async function shopifyWebhook(rpc: Rpc, cfg: Config, headers: { get(k: st
   if (!order) return { status: 200, body: { ok: true, ignored: "not_an_order" } };
   order.ref = order.ref ? await acceptRef(cfg, order.ref) : "";
   if (!order.ref && !order.coupons.length && fetchRaw && order.status !== "cancelled") {
-    const cred = (await rpc("app_credentials", { p_connection: c.connection_id })).data as { shop: string; token: string } | null;
-    if (cred?.token && cred.token !== "revoked")
-      order.ref = await acceptRef(cfg, await shopifyJourneyRef(retrying(fetchRaw, cfg.sleep), cfg, cred.shop, cred.token, order.id).catch(() => ""));
+    const fetchFn = retrying(fetchRaw, cfg.sleep);
+    const cred = await shopifyAccess(rpc, fetchFn, cfg, c.connection_id).catch(() => null);
+    if (cred) order.ref = await acceptRef(cfg, await shopifyJourneyRef(fetchFn, cfg, cred.shop, cred.token, order.id).catch(() => ""));
   }
   const at = body.updated_at ?? body.created_at ?? new Date().toISOString();
   const r = await rpc("ingest_order_event", { p_connection: c.connection_id, p_event: {

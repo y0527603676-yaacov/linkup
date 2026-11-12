@@ -13,7 +13,7 @@ export const date = (iso: string | null | undefined, locale: Loc = "he") =>
 export const shortDate = (iso: string | null | undefined, locale: Loc = "he") =>
   iso ? new Date(iso).toLocaleDateString(tag(locale), { day: "numeric", month: "short" }) : "—";
 
-const KNOWN = new Set(["shop_not_allowed", "store_already_connected", "https_required", "consent_required", "invalid_state", "not_available", "test_isolation", "email_in_use", "too_many", "not_found", 
+const KNOWN = new Set(["app_partial", "shop_not_allowed", "store_already_connected", "https_required", "consent_required", "invalid_state", "not_available", "test_isolation", "email_in_use", "too_many", "not_found", 
   "forbidden", "not_authenticated", "invalid_url", "invalid_name", "invalid_type", "proposal_closed", "proposal_expired",
   "wrong_org_type", "rate_limited", "not_found", "too_many_orgs", "activity_rate_limited", "already_connected", "app_install_failed", "app_scopes_missing", "app_not_verified", "shop_linked_elsewhere", "invalid_shop", "consent_required", "invalid_phone", "help_already_requested", "unsupported_org_type", "not_a_store", "not_a_creator",
   "bad_code", "email", "send_failed", "invalid_email", "invalid_role", "last_owner", "invite_invalid", "invite_email_mismatch",
