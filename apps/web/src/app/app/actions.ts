@@ -1,5 +1,5 @@
 "use server";
-import { shopifyAppOffered } from "@/lib/app-test-shops";
+import { appsFunctionBase, shopifyAppOffered, shopifyInstallStart } from "@/lib/app-test-shops";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -551,10 +551,10 @@ export async function startAppInstall(form: FormData) {
   if ((others ?? []).some((c: { site_url: string }) => c.site_url !== `https://${shop}`)) fail("store_already_connected");
   const { data, error } = await sb.rpc("start_app_install", { p_org: org, p_platform: platform, p_shop: platform === "shopify" ? shop : null });
   if (error) fail(errorCode(error));
-  const fnBase = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/apps`;
+  const fnBase = appsFunctionBase();
   if (platform === "shopify") {
     // The edge function adds the app's Client ID (kept in function secrets) and sends the owner to Shopify's approval.
-    redirect(`${fnBase}/shopify/install?${new URLSearchParams({ shop, state: String(data) })}`);
+    redirect(shopifyInstallStart(shop, String(data)));
   }
   redirect(`https://www.wix.com/installer/install?${new URLSearchParams({ appId: process.env.WIX_APP_ID ?? "", redirectUrl: `${fnBase}/wix/callback`, state: String(data) })}`);
 }
