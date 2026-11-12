@@ -324,6 +324,27 @@ async function shopifyVerifyAndSync(rpc: Rpc, fetchFn: Fetch, cfg: Config, conn:
   return { ok: true as const, partial: false, coupons, products };
 }
 
+/** Live check of an app connection (read-only toward Shopify): is the stored token accepted, and does every required
+ *  component exist? Called when the owner opens the connect page, so the status shown is the real one.
+ *  - "reconnect": Shopify rejects the token (e.g. an old non-expiring token after switching to public distribution,
+ *    an expired refresh token, or the app was removed) → the owner repeats the approval; nothing is deleted.
+ *  - "partial": the token works but components are missing → "complete the connection".
+ *  - "ok": everything exists. */
+export async function shopifyCheck(rpc: Rpc, fetchFn: Fetch, cfg: Config, conn: string):
+  Promise<{ state: "ok" | "partial" | "reconnect" | "unknown"; missing?: string[] }> {
+  const acc = await shopifyAccess(rpc, fetchFn, cfg, conn);
+  if (!acc) { await rpc("app_sync_failed", { p_connection: conn, p_reason: "token_invalid" }); return { state: "reconnect" }; }
+  const r = await gql(fetchFn, cfg, acc.shop, acc.token, "{ webhookSubscriptions(first: 100) { nodes { topic uri } } webPixel { id } }");
+  if (r.status === 401 || r.status === 403) { await rpc("app_sync_failed", { p_connection: conn, p_reason: "token_invalid" }); return { state: "reconnect" }; }
+  const j = r.ok ? await r.json().catch(() => null) : null;
+  if (!j?.data) return { state: "unknown" };   // temporary problem: say nothing new
+  const hook = `${cfg.functionsBase}/shopify/webhook`;
+  const topics = new Set<string>((j.data.webhookSubscriptions?.nodes ?? []).filter((n: any) => n?.uri === hook).map((n: any) => String(n.topic)));
+  const missing = [...SHOPIFY_TOPICS.filter((t) => !topics.has(t)), ...(j.data.webPixel?.id ? [] : ["PIXEL"])];
+  if (missing.length) { await rpc("app_sync_failed", { p_connection: conn, p_reason: `partial:${missing.join(",").toLowerCase()}` }); return { state: "partial", missing }; }
+  return { state: "ok" };
+}
+
 export async function shopifyActivate(rpc: Rpc, fetchFn: Fetch, cfg: Config, conn: string) {
   return shopifyVerifyAndSync(rpc, fetchFn, cfg, conn, true);
 }

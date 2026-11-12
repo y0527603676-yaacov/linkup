@@ -342,6 +342,20 @@ describe("Shopify reliability: expiring tokens, real component check, partial st
     expect(HOOKS.topics.size).toBe(before + 3);
     expect((await q(`select status, last_error from store_connections where org_id = $1`, [st]))[0]).toEqual({ status: "connected", last_error: null });
   });
+  it("live check: an old non-expiring token rejected by Shopify → 'reconnect' (nothing deleted); missing parts → 'partial'; all present → 'ok'", async () => {
+    const rejectPlain: core.Fetch = async (url, init) =>
+      (init?.headers?.["X-Shopify-Access-Token"] === "shpat_plain" ? res(403, { errors: "Non-expiring access tokens are no longer accepted" }) : shop.f(url, init));
+    await call(svc, "app_save_token", { p_connection: conn, p_token: "shpat_plain" });
+    expect(await core.shopifyCheck(rpc, rejectPlain, cfg, conn)).toEqual({ state: "reconnect" });
+    expect((await q(`select status, last_error from store_connections where id = $1`, [conn]))[0])
+      .toEqual({ status: "connected", last_error: "app_sync: token_invalid" });   // shown as "action needed"; no data removed
+    await call(svc, "app_save_token", { p_connection: conn, p_token: core.packToken({ a: "shpat_x", r: "R1", e: now() + 3600, re: now() + 86400 }) });
+    HOOKS.topics = new Set(["APP_UNINSTALLED"]); HOOKS.pixel = true; HOOKS.block.clear();
+    expect(await core.shopifyCheck(rpc, rejectPlain, cfg, conn)).toEqual({ state: "partial", missing: ["ORDERS_CREATE", "ORDERS_UPDATED", "ORDERS_CANCELLED"] });
+    expect(HOOKS.topics.size).toBe(1);   // the check itself never creates anything
+    HOOKS.topics = new Set(core.SHOPIFY_TOPICS);
+    expect(await core.shopifyCheck(rpc, rejectPlain, cfg, conn)).toEqual({ state: "ok" });
+  });
   it("components that already exist are not created again", async () => {
     HOOKS.topics = new Set(core.SHOPIFY_TOPICS); HOOKS.pixel = true; let creates = 0;
     const f: core.Fetch = async (url, init) => { if (init?.body?.includes("webhookSubscriptionCreate")) creates++; return shop.f(url, init); };

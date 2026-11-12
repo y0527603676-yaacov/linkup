@@ -25,7 +25,7 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
   const { sb, org, t, locale } = ctx;
   const l = t.connect;
   const [{ data: conns }, { data: o }, { data: pend }, { data: apiOpen }, { data: wpOpen }, { data: pubDocs }] = await Promise.all([
-    sb.from("store_connections").select("status, site_url, last_sync_at, plugin_version, method, last_error, platform").eq("org_id", org.id).order("created_at", { ascending: false }).limit(1),
+    sb.from("store_connections").select("id, status, site_url, last_sync_at, plugin_version, method, last_error, platform").eq("org_id", org.id).order("created_at", { ascending: false }).limit(1),
     sb.from("organizations").select("website_url").eq("id", org.id).single(),
     sb.rpc("legal_pending", { p_context: "store" }),
     sb.rpc("woo_api_available", { p_org: org.id }),
@@ -41,13 +41,29 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
   // Shopify app: partial connection (a required component missing), an install that never came back, or opened from
   // Shopify with no finished connection → one clear card with one button that repeats the approval (no reinstall).
   const appShop = c?.method === "app" && c.platform === "shopify" ? (c.site_url.match(/^https:\/\/([a-z0-9-]+\.myshopify\.com)$/)?.[1] ?? null) : null;
-  const appPartial = !!appShop && !!c?.last_error?.startsWith("app_sync: partial");
+  // Live check with Shopify (token accepted? every component present?) — the stored status alone is not trusted.
+  let live = "unknown" as "ok" | "partial" | "reconnect" | "unknown";
+  if (appShop) {
+    try {
+      const { data: { session } } = await sb.auth.getSession();
+      const conn = (conns?.[0] as { id?: string } | undefined)?.id;
+      if (session?.access_token && conn) {
+        const r = await fetch(`${appsFunctionBase()}/shopify/check`, { method: "POST", cache: "no-store", signal: AbortSignal.timeout(8000),
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ connection: conn }) });
+        if (r.ok) live = ((await r.json()) as { state?: typeof live }).state ?? "unknown";
+      }
+    } catch { live = "unknown"; }
+  }
+  const appReconnect = !!appShop && (live === "reconnect" || (live === "unknown" && /^app_sync: (token_invalid|token_refresh_failed)/.test(c?.last_error ?? "")));
+  const appPartial = !!appShop && !appReconnect && (live === "partial" || (live === "unknown" && !!c?.last_error?.startsWith("app_sync: partial")));
+  const appOk = !!appShop && live === "ok";
   let pending: { org?: string; shop?: string; at?: number } | null = null;
   try { pending = JSON.parse((await cookies()).get("lk_app_pending")?.value ?? "null"); } catch { pending = null; }
   const pendShop = pending?.org === org.id && typeof pending.shop === "string" && shopifyAppOffered(pending.shop)
     && !(connected && appShop === pending.shop && !appPartial) && sp.ok !== "app_connected" && sp.error !== "app_partial" ? pending.shop : null;
   const resumeShop = typeof sp.resume === "string" && shopifyAppOffered(sp.resume) && !(connected && appShop === sp.resume && !appPartial) ? sp.resume : null;
-  const appFinish = appPartial ? { shop: appShop!, title: t.uc.app.partialT, text: t.uc.app.partialD, cta: t.uc.app.finish }
+  const appFinish = appReconnect ? { shop: appShop!, title: t.uc.app.reconnectT, text: t.uc.app.reconnectD, cta: t.uc.app.reconnectCta }
+    : appPartial ? { shop: appShop!, title: t.uc.app.partialT, text: t.uc.app.partialD, cta: t.uc.app.finish }
     : resumeShop ? { shop: resumeShop, title: t.uc.app.resumeT, text: t.uc.app.resumeD.replace("{shop}", resumeShop), cta: t.uc.app.finish }
     : pendShop ? { shop: pendShop, title: t.uc.app.pendingT, text: t.uc.app.pendingD.replace("{shop}", pendShop), cta: t.uc.app.cont }
     : null;
@@ -136,13 +152,13 @@ export default async function Connect({ searchParams }: { searchParams: Promise<
 
         {c && (
           <div className="card card-flat stack" style={{ marginBottom: 16, gap: 6 }}>
-            <p className="row" style={{ margin: 0 }}><span className={`dot${connected && !c.last_error ? "" : " dot-off"}`} /><b>{t.dash.connection[c.status]}</b> · <span className="ltr">{c.site_url}</span></p>
+            <p className="row" style={{ margin: 0 }}><span className={`dot${(appShop ? appOk : connected && !c.last_error) ? "" : " dot-off"}`} /><b>{appReconnect || appPartial ? t.uc.app.actionNeeded : t.dash.connection[c.status]}</b> · <span className="ltr">{c.site_url}</span></p>
             <p className="small muted" style={{ margin: 0 }}>{c.method === "api" ? l.viaApi : c.method === "signed_api" ? u.viaCustom : c.method === "app" ? u.app.viaApp : l.viaPlugin}
               {c.last_sync_at ? ` · ${t.dash.connection.lastSync}: ${shortDate(c.last_sync_at, locale)}` : ""}
               {c.method === "plugin" && c.plugin_version ? ` · v${c.plugin_version}` : ""}</p>
             {c.method === "signed_api" && <a className="btn btn-ghost btn-sm" href={`/app/connect/api?org=${org.id}`}>{u.toApi}</a>}
             {c.status === "connected" && <a className="small" href={`/app/claims?org=${org.id}`}>{u.claims.title}</a>}
-            {c.last_error && !appPartial && <p className="alert alert-warn small" style={{ margin: 0 }}>{l.errors[c.last_error] ?? l.errors.other}</p>}
+            {c.last_error && !appShop && <p className="alert alert-warn small" style={{ margin: 0 }}>{l.errors[c.last_error] ?? l.errors.other}</p>}
             {c.method === "api" && c.status !== "disconnected" && (
               <form action={syncWooApi}><input type="hidden" name="org" value={org.id} /><button className="btn btn-ghost btn-sm">{l.syncNow}</button></form>
             )}

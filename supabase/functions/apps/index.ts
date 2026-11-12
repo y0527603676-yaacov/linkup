@@ -1,6 +1,7 @@
 // LINKUP ↔ Shopify / Wix apps. Deployed with verify_jwt = false: every route authenticates itself.
 //   GET  /apps/shopify/install    Start: adds the Client ID and sends the owner to Shopify's approval screen
 //   GET  /apps/shopify/open       Opened from Shopify admin (signed): finish a missing connection with one click
+//   POST /apps/shopify/check      Live status of the signed-in owner's Shopify connection (user JWT; read-only toward Shopify)
 //   GET  /apps/shopify/callback   Shopify OAuth redirect (HMAC-verified query + one-time LINKUP state)
 //   POST /apps/shopify/webhook    Shopify webhooks (X-Shopify-Hmac-Sha256), incl. mandatory privacy webhooks
 //   GET  /apps/wix/callback       Wix install redirect (instanceId + one-time LINKUP state)
@@ -12,7 +13,7 @@
 // also needs its own credentials (SHOPIFY_API_KEY / SHOPIFY_API_SECRET, WIX_APP_ID / WIX_APP_SECRET / WIX_PUBLIC_KEY)
 // plus LINKUP_REF_SECRET for personal links. Secrets live only in Supabase function secrets — never in code or logs.
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { shopifyCallback, shopifyInstall, shopifyOpen, shopifyRef, shopifyWebhook, syncAll, wixCallback, wixRef, wixWebhook, type Config, type Rpc } from "./core.ts";
+import { shopifyCallback, shopifyCheck, shopifyInstall, shopifyOpen, shopifyRef, shopifyWebhook, syncAll, wixCallback, wixRef, wixWebhook, type Config, type Rpc } from "./core.ts";
 
 const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
   auth: { persistSession: false, autoRefreshToken: false },
@@ -40,6 +41,22 @@ const reply = (r: { status: number; body?: unknown; redirect?: string }, extra: 
 // The Wix beacon is sent from the store's own site (any domain); it returns nothing sensitive.
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST, OPTIONS", "Access-Control-Allow-Headers": "content-type" };
 
+/** Only a member of the store that owns the connection may ask for its live status. */
+async function check(req: Request, raw: string) {
+  const jwt = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
+  let conn = ""; try { conn = String(JSON.parse(raw)?.connection ?? ""); } catch { /* invalid */ }
+  if (!jwt || !/^[0-9a-f-]{36}$/.test(conn)) return { status: 400, body: { error: "invalid_input" } };
+  const { data: u } = await supabase.auth.getUser(jwt);
+  if (!u?.user) return { status: 401, body: { error: "unauthorized" } };
+  const { data: sc } = await supabase.from("store_connections").select("org_id, method, platform, site_url").eq("id", conn).maybeSingle();
+  if (!sc || sc.method !== "app" || sc.platform !== "shopify") return { status: 404, body: { error: "not_found" } };
+  const { data: m } = await supabase.from("memberships").select("role").eq("user_id", u.user.id).eq("org_id", sc.org_id).maybeSingle();
+  if (!m) return { status: 403, body: { error: "forbidden" } };
+  const shop = String(sc.site_url).replace(/^https:\/\//, "");
+  if (!cfg.allowedShops?.includes("*") && !cfg.allowedShops?.includes(shop)) return { status: 200, body: { state: "unknown" } };
+  return { status: 200, body: await shopifyCheck(rpc, fetch, cfg, conn) };
+}
+
 const enabled = Deno.env.get("LINKUP_APPS_ENABLED") === "1";
 const off = () => reply({ status: 503, body: { error: "not_enabled" } });
 
@@ -59,6 +76,7 @@ Deno.serve(async (req) => {
   if (req.method === "POST") {
     const raw = await req.text();
     if (raw.length > MAX_BODY) return reply({ status: 413, body: { error: "too_large" } });
+    if (path === "shopify/check") return reply(await check(req, raw));
     if (path === "shopify/webhook") return reply(await shopifyWebhook(rpc, cfg, req.headers, raw, fetch));
     if (path === "wix/webhook") return reply(await wixWebhook(rpc, cfg, raw));
     if (path === "shopify/ref") return reply(raw.length > 2048 ? { status: 413, body: { error: "too_large" } } : await shopifyRef(rpc, fetch, cfg, raw), CORS);

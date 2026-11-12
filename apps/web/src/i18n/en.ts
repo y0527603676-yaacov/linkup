@@ -366,6 +366,8 @@ export const en: Dict = {
       finish: "Complete the connection",
       pendingT: "Installation not finished", pendingD: "You started connecting {shop} and didn't come back from Shopify. You can continue from here in one tap.",
       resumeT: "The app is installed in Shopify, but the LINKUP connection isn't finished", resumeD: "One tap completes it for {shop}.",
+      reconnectT: "Approve the connection again in Shopify", reconnectD: "Shopify no longer accepts LINKUP's previous access (for example after an app update). One approval restores the connection. No data is deleted and no reinstall is needed.",
+      reconnectCta: "Approve again", actionNeeded: "Action needed",
       cont: "Continue connecting",
     },
     help: {
