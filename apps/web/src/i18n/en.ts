@@ -543,7 +543,7 @@ export const en: Dict = {
   },
   lc: {
     reg: "I have read and accept the General Terms of Use and the terms applicable to my role. I have read the Privacy Policy.",
-    store: "LINKUP charges 2% plus applicable VAT for six months from first connection-key creation; thereafter the standard rate, initially 3% plus VAT, may change prospectively with notice and acceptance. The base excludes sales VAT and shipping and is net of discounts. I accept the Commercial Terms for Merchants and Commissions, Payments and Reconciliation Policy.",
+    store: "LINKUP charges 2% plus applicable VAT for six months from the store's first successful connection (verified data received); thereafter the standard rate, initially 3% plus VAT, may change prospectively with notice and acceptance. The base excludes sales VAT and shipping and is net of discounts. I accept the Commercial Terms for Merchants and Commissions, Payments and Reconciliation Policy.",
     collab: "I accept the displayed creator commission rate, attribution rules and campaign terms.",
     rate: (o: string, n: string, d: string) => `Your standard rate will change from ${o} to ${n} plus VAT on ${d}, at least 30 days after notice. Only future sales are affected. Accept or discontinue future activity without losing accrued rights.`,
     rateAccept: "Accept new rate", rateDecline: "Decline - manage wind-down",
@@ -620,7 +620,8 @@ export const en: Dict = {
     title: "Legal documents", lead: "All documents that apply to using LINKUP.", none: "The legal documents are being finalised and will be published before sign-up opens.",
     version: (v: number, d: string) => `Version ${v} · effective ${d}`, back: "All documents",
     agree: "I have read and agree to:", agreeStore: "On behalf of the store, I accept:", required: "Please accept the documents to continue.",
-    acceptTitle: "Updated documents", acceptLead: "We published documents that apply to your use of LINKUP. Please read and accept to continue.", acceptCta: "Accept and continue",
+    acceptTitle: "Your terms, in one place", acceptLead: "To keep things clear and transparent, we gathered the documents that apply to using LINKUP in one place. Take your time to read them.", acceptCta: "Accept and continue",
+    acceptCalm: ["Acceptance applies from today onward", "Nothing already recorded in your account changes", "The documents stay available at any time"], acceptFounders: (d: string) => `Your founders pricing (2% + VAT) is kept until ${d}.`, acceptRead: "Read", acceptDocsGeneral: "For all users", acceptDocsStore: "For your store", acceptHelp: "Questions? Write to us through the contact form.",
     updated: "Updated", footer: "Legal", operator: "Operator details", otherDocs: "Other documents", otherLang: "עברית", drafts: "Legal documents (drafts for review)", draftBadge: "Draft - not published", preview: "View", draftNote: "Drafts were loaded verbatim from the source file. Publish only after counsel and CPA approval.", ver: (v: number) => `Version ${v}.0`, effective: (d: string) => `Effective ${d}`, contact: "Contact",
   },
   errors: {

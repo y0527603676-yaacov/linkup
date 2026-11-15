@@ -58,7 +58,7 @@ export async function loadApp(sp: Record<string, string | string[] | undefined>,
   const ctxs = ["signup", ...(useType ? [typeCtx] : [])];
   const pend = [signupPend, ...(useType ? [typePend] : [])];
   if (pend.some((r) => Array.isArray(r.data) && r.data.length > 0)) {
-    redirect(`/legal/accept?ctx=${ctxs.join(",")}&next=${encodeURIComponent(`/app?org=${org.id}`)}`);
+    redirect(`/legal/accept?ctx=${ctxs.join(",")}&org=${org.id}&next=${encodeURIComponent(`/app?org=${org.id}`)}`);
   }
   const { t, locale, dir } = await getT();
   return { sb, orgs, org, status: status as OrgStatus, isPlatformAdmin: admin === true, t, locale, dir };

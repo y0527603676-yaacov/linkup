@@ -423,7 +423,7 @@ export async function acceptPendingLegal(form: FormData) {
   const sb = await getSupabase();
   const next = safeNext(str(form, "next") || "/app");
   const ctxRaw = str(form, "ctx");
-  const back = `/legal/accept?ctx=${encodeURIComponent(ctxRaw)}&next=${encodeURIComponent(next)}`;
+  const back = `/legal/accept?ctx=${encodeURIComponent(ctxRaw)}&org=${encodeURIComponent(str(form, "org"))}&next=${encodeURIComponent(next)}`;
   const general = form.getAll("legal").map(String).filter(Boolean);
   const store = form.getAll("legal_store").map(String).filter(Boolean);
   if ((general.length && str(form, "agree") !== "1") || (store.length && str(form, "agree_store") !== "1")) redirect(`${back}&error=legal_acceptance_required`);
@@ -431,11 +431,16 @@ export async function acceptPendingLegal(form: FormData) {
   const lists = await Promise.all(ctx.map((c) => sb.rpc("legal_pending", { p_context: c })));
   const re = new Set(lists.flatMap((r) => (r.data ?? []) as { doc_key: string; reacceptance: boolean }[]).filter((p) => p.reacceptance).map((p) => p.doc_key));
   const locale = await getLocale();
-  const keys = [...general, ...store];
-  for (const [list, type] of [[keys.filter((k) => !re.has(k)), "existing_user"], [keys.filter((k) => re.has(k)), "reacceptance"]] as const) {
-    if (!list.length) continue;
-    const { error } = await sb.rpc("accept_legal", { p_doc_keys: list, p_type: type, p_org: null, p_locale: locale });
-    if (error) redirect(`${back}&error=${errorCode(error)}`);
+  // Store terms are recorded against the store they were accepted for, so the acceptance proves which business agreed.
+  const orgRaw = str(form, "org");
+  const storeOrg = /^[0-9a-f-]{36}$/i.test(orgRaw) ? orgRaw : null;
+  if (store.length && !storeOrg) redirect(`${back}&error=legal_acceptance_required`);
+  for (const [keys, org] of [[general, null], [store, storeOrg]] as const) {
+    for (const [list, type] of [[keys.filter((k) => !re.has(k)), "existing_user"], [keys.filter((k) => re.has(k)), "reacceptance"]] as const) {
+      if (!list.length) continue;
+      const { error } = await sb.rpc("accept_legal", { p_doc_keys: list, p_type: type, p_org: org, p_locale: locale });
+      if (error) redirect(`${back}&error=${errorCode(error)}`);
+    }
   }
   redirect(next);
 }
