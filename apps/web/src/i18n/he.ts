@@ -470,7 +470,7 @@ export const he = {
     title: "עדכונים", empty: "אין עדכונים חדשים.", markRead: "סימון הכל כנקרא",
     kinds: {
       sale_claim_opened: "משפיען פתח בירור על מכירה", sale_claim_answered: "החנות ענתה על בירור מכירה",
-      first_sale: "🎉 מכירה ראשונה!", sale: "מכירה חדשה", campaign_launched: "קמפיין חדש", partner_joined: "שותף חדש הצטרף",
+      first_sale: "🎉 מכירה ראשונה!", sale: "מכירה חדשה", ops_alert: "⚠️ תקלה שדורשת טיפול", campaign_launched: "קמפיין חדש", partner_joined: "שותף חדש הצטרף",
       application_received: "בקשת הצטרפות חדשה", application_approved: "הבקשה אושרה", application_rejected: "הבקשה נדחתה",
       invoice_issued: "הופקה דרישת תשלום", invoice_delivered: "התקבלה דרישת תשלום מ-LINKUP", fee_change_notice: "הודעה על שינוי בתעריף LINKUP", dispute_resolved: "המחלוקת על דרישת התשלום טופלה", wind_down_planned: "הודעה מוקדמת על סיום שיתוף פעולה", payout_due_soon: "מועד תשלום עמלה מתקרב", payout_overdue: "תשלום עמלה באיחור", payout_withdrawn: "דיווח תשלום בוטל", payout_dispute_answered: "החנות השיבה לגבי התשלום", charge_succeeded: "דרישת התשלום שולמה אוטומטית", charge_failed: "החיוב נכשל, ננסה שוב", charge_failed_final: "החיוב נכשל. יש לעדכן אמצעי תשלום", refund_succeeded: "בוצע החזר", refund_failed: "החזר נכשל", payout_marked: "חנות סימנה תשלום אליך", payout_confirmed: "השותף אישר קבלת תשלום",
       payout_disputed: "השותף דיווח שהתשלום לא תואם", referral_joined: "מישהו הצטרף דרכך", first_reward: "התגמול הראשון שלך ב-Founding Partners",
@@ -506,7 +506,8 @@ export const he = {
       rStores: "חנויות אמיתיות מחוברות", rInvoicing: "הפקת דרישות תשלום (אישור מס)", rCollection: "גבייה אוטומטית", rRewards: "קיזוז ותשלום תגמולים",
       rApi: "חיבור מהיר בלי תוסף", rApiOpen: "פתוח לכל החנויות", rApiBeta: "בבדיקה: מנהל וחשבונות בדיקה בלבד",
     },
-    testTitle: "חשבונות בדיקה", testLead: "ההרשמה הציבורית סגורה. מיילים שמופיעים כאן יכולים להירשם ולעבור את תהליך ההצטרפות המלא. הפעילויות שלהם מסומנות כבדיקה ונפרדות לגמרי מחנויות ומשפיענים אמיתיים. טיפ: בכתובת Gmail אפשר להוסיף +store או +creator לפני ה-@, וההודעות יגיעו לאותה תיבה.", testNote: "הערה (לא חובה)", testAdd: "הוספה", testRemove: "הסרה", testRegistered: "נרשם", testWaiting: "ממתין להרשמה",
+    testTitle: "הזמנות להרשמה (פיילוט ובדיקות)", testLead: "ההרשמה הציבורית סגורה. רק מיילים שמופיעים כאן יכולים להירשם. כתובת בדיקה: הפעילויות מסומנות כבדיקה ונפרדות לגמרי מחנויות ומשפיענים אמיתיים. משתתף פיילוט: הפעילויות אמיתיות. טיפ: בכתובת Gmail אפשר להוסיף +store או +creator לפני ה-@, וההודעות יגיעו לאותה תיבה.", testNote: "הערה (לא חובה)", testAdd: "הוספה", testRemove: "הסרה", testRegistered: "נרשם", testWaiting: "ממתין להרשמה", pilotCheck: "משתתף פיילוט אמיתי (לא בדיקה)", pilotBadge: "פיילוט", testBadge: "בדיקה",
+    alertsTitle: "תקלות שדורשות טיפול", alertsNone: "אין תקלות פתוחות.", alertsSince: "מאז", alertKinds: { store_disconnected: "חנות התנתקה ויש לה שיתופי פעולה פעילים", token_refresh_failed: "חידוש ההרשאה לחנות נכשל – נדרש חיבור מחדש", coupon_sync_failed: "קופונים לא נוצרו או לא הושבתו בחנות", sync_failed: "סנכרון החנות נכשל", order_backlog: "אירועי הזמנות לא עובדו", store_silent: "החנות לא סונכרנה יותר מיממה" } as Record<string, string>,
     vatBasisTitle: "שיתופי פעולה שממתינים להכרעת מע״מ", vatBasisLead: "נוצרו לפני שהוגדר שעמלת המשפיען היא לפני מע״מ. עד להכרעה לא מחושב מע״מ. רשמו הכרעה רק אחרי ששני הצדדים אישרו.", vatBasisNote: "על מה ההכרעה מבוססת (חובה)", vatBasisDecide: "העמלה לפני מע״מ – לרשום הכרעה",
     title: "ניהול הפיילוט", funnel: "משפך", stores: "חנויות", creators: "משפיענים", connected: "מחוברות", silent: "חנויות ששתקו מעל 24 שעות",
     sales30: "מכירות מיוחסות (30 יום)", feesPending: "עמלות LINKUP ממתינות", uninvoiced: "מאושר, טרם חויב", openInv: "דרישות תשלום פתוחות",

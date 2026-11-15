@@ -20,12 +20,14 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
   const tab = ["overview", "orgs", "finance", "settings"].includes(sp.tab ?? "") ? sp.tab! : "overview";
   const { data: pov } = tab === "overview" || tab === "orgs" ? await sb.rpc("admin_pilot_overview", { p_include_test: sp.test === "1" }) : { data: null };
   const { data: ts } = await sb.rpc("admin_test_signups");
+  const { data: oa } = tab === "overview" ? await sb.rpc("admin_ops_alerts") : { data: null };
+  const opsAlerts = (oa ?? []) as { id: string; kind: string; org: string | null; detail: string | null; first_seen: string; occurrences: number }[];
   const [{ data: cf }, { data: chq }] = tab === "overview" ? await Promise.all([sb.rpc("connect_funnel_stats", { p_days: 30 }), sb.rpc("admin_connect_help")]) : [{ data: null }, { data: null }];
   const ac = t.uc.adminConnect; const C = (cf ?? null) as Record<string, any> | null; const helpReqs = (chq ?? []) as any[];
   // Percentages only with a meaningful sample (no "100%" from one store).
   const MIN_SAMPLE = 10;
   const share = (n: number, d: number) => (d >= MIN_SAMPLE ? `${Math.round((n / d) * 100)}%` : "—");
-  const testSignups = (ts ?? []) as { email: string; note: string | null; registered: boolean }[];
+  const testSignups = (ts ?? []) as { email: string; note: string | null; registered: boolean; is_test?: boolean }[];
   const F = (fd ?? {}) as Record<string, any>;
   const exceptions = (exq ?? []) as any[];
   const bl = t.billing;
@@ -55,6 +57,13 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
         {(["overview", "orgs", "finance", "settings"] as const).map((k) => (
           <Link key={k} className={`tab${tab === k ? " on" : ""}`} href={`/app/admin?org=${org.id}&tab=${k}`} aria-current={tab === k ? "page" : undefined}>{a.tabs[k]}</Link>))}
       </nav>
+      {tab === "overview" && oa !== null && (
+        <section className="section"><H>{a.alertsTitle}</H>
+          {!opsAlerts.length ? <p className="small muted">{a.alertsNone}</p> : <div className="list">{opsAlerts.map((x) => (
+            <div className="item" key={x.id}><div className="grow"><div className="title">{a.alertKinds[x.kind] ?? x.kind}</div>
+              <div className="meta">{[x.org, x.detail].filter(Boolean).join(" · ")} · {a.alertsSince} {shortDate(x.first_seen, locale)}</div></div></div>))}</div>}
+        </section>
+      )}
       {tab === "overview" && C && (
         <section className="section"><H>{ac.title}</H>
           <div className="stats">
@@ -256,10 +265,11 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
         <form action={adminAction} className="row" style={{ flexWrap: "wrap", gap: 8 }}>{hidden}<input type="hidden" name="op" value="test_add" />
           <input name="email" type="email" required dir="ltr" placeholder="name+store@gmail.com" style={{ flex: 2, minWidth: 200 }} />
           <input name="note" maxLength={200} placeholder={a.testNote} style={{ flex: 1, minWidth: 140 }} />
+          <label className="row small" style={{ gap: 6, flexBasis: "100%" }}><input type="checkbox" name="pilot" value="1" style={{ width: "auto" }} /><span>{a.pilotCheck}</span></label>
           <button className="btn btn-primary btn-sm">{a.testAdd}</button></form>
         {testSignups.length > 0 && <div className="list" style={{ marginTop: 12 }}>{testSignups.map((x) => (
           <div className="item" key={x.email}>
-            <div className="grow"><div className="title ltr">{x.email}</div>{x.note && <div className="meta">{x.note}</div>}</div>
+            <div className="grow"><div className="title ltr">{x.email} <span className={`badge ${x.is_test === false ? "badge-money" : "badge-warn"}`}>{x.is_test === false ? a.pilotBadge : a.testBadge}</span></div>{x.note && <div className="meta">{x.note}</div>}</div>
             <span className={`badge ${x.registered ? "badge-money" : ""}`}>{x.registered ? a.testRegistered : a.testWaiting}</span>
             <form action={adminAction}>{hidden}<input type="hidden" name="op" value="test_remove" /><input type="hidden" name="email" value={x.email} />
               <button className="btn btn-ghost btn-sm">{a.testRemove}</button></form>

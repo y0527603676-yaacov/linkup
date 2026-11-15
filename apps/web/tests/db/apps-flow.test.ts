@@ -18,7 +18,7 @@ let u: Record<string, Who> = {}; let org: Record<string, string> = {}; let code 
 const call = async <T = any>(who: Who, fn: string, args: Record<string, unknown> = {}): Promise<T> => {
   const keys = Object.keys(args);
   return (await db.one<{ r: T }>(who, `select public.${fn}(${keys.map((k, i) => `${k} => $${i + 1}`).join(", ")}) as r`,
-    keys.map((k) => (typeof args[k] === "object" && args[k] !== null ? JSON.stringify(args[k]) : args[k])))).r;
+    keys.map((k) => (typeof args[k] === "object" && args[k] !== null && !Array.isArray(args[k]) ? JSON.stringify(args[k]) : args[k])))).r;
 };
 const rpc: core.Rpc = async (fn, args = {}) => { try { return { data: await call(svc, fn, args), error: null }; } catch (e) { return { data: null, error: { message: (e as Error).message } }; } };
 const q = <T = any>(sql: string, p: unknown[] = []) => db.as<T>(owner, sql, p);

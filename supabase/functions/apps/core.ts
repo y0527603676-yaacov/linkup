@@ -342,6 +342,9 @@ async function shopifyVerifyAndSync(rpc: Rpc, fetchFn: Fetch, cfg: Config, conn:
   const coupons = await shopifySyncCoupons(fetchFn, cfg, acc.shop, acc.token, (sync.data?.coupons ?? []) as Coupon[],
     (code, id, active) => rpc("app_coupon_mark", { p_connection: conn, p_code: code, p_external_id: id, p_active: active }).then(() => undefined));
   const products = withProducts ? await shopifySyncProducts(rpc, fetchFn, cfg, conn, acc.shop, acc.token) : null;
+  // Coupons that could not be created or turned off are an operator alert; a clean run clears any recorded problem.
+  if (coupons.failed > 0) await rpc("app_sync_failed", { p_connection: conn, p_reason: `coupons_failed:${coupons.failed}` });
+  else await rpc("app_sync_ok", { p_connection: conn });
   return { ok: true as const, partial: false, coupons, products };
 }
 
@@ -363,7 +366,7 @@ export async function shopifyCheck(rpc: Rpc, fetchFn: Fetch, cfg: Config, conn: 
   const topics = new Set<string>((j.data.webhookSubscriptions?.nodes ?? []).filter((n: any) => n?.uri === hook).map((n: any) => String(n.topic)));
   const missing = [...SHOPIFY_TOPICS.filter((t) => !topics.has(t)), ...(j.data.webPixel?.id ? [] : ["PIXEL"])];
   if (missing.length) { await rpc("app_sync_failed", { p_connection: conn, p_reason: `partial:${missing.join(",").toLowerCase()}` }); return { state: "partial", missing }; }
-  return { state: "ok" };
+  return { state: "ok" };   // (a recorded coupon problem is cleared only by the next clean sync)
 }
 
 export async function shopifyActivate(rpc: Rpc, fetchFn: Fetch, cfg: Config, conn: string) {
@@ -555,9 +558,28 @@ export async function shopifyWebhook(rpc: Rpc, cfg: Config, headers: { get(k: st
   const topic = headers.get("x-shopify-topic") ?? ""; const shop = (headers.get("x-shopify-shop-domain") ?? "").toLowerCase();
   const id = headers.get("x-shopify-webhook-id") ?? headers.get("x-shopify-event-id") ?? "";
   let body: any; try { body = JSON.parse(raw); } catch { return { status: 400, body: { error: "invalid_json" } }; }
-  // Mandatory privacy webhooks: LINKUP stores no customer names/contacts (only an e-mail hash for self-referral checks).
-  if (topic === "customers/data_request" || topic === "customers/redact") return { status: 200, body: { ok: true, stored_customer_data: "none" } };
-  if (topic === "app/uninstalled" || topic === "shop/redact") {
+  // Mandatory privacy webhooks. LINKUP stores no customer names or contacts; the only customer-related value is a
+  // SHA-256 hash of the buyer's e-mail (self-referral check). Redaction removes it; financial records stay.
+  const shopDomain = shop || String(body?.shop_domain ?? "").toLowerCase();
+  if (topic === "customers/data_request") {
+    const r = await rpc("privacy_record_request", { p_platform: "shopify", p_shop: shopDomain, p_kind: "data_request", p_ref: String(body?.data_request?.id ?? "") });
+    if (r.error) return { status: 500, body: { error: "temporary_error" } };
+    return { status: 200, body: { ok: true, stored_customer_data: "email_hash_only" } };
+  }
+  if (topic === "customers/redact") {
+    const email = typeof body?.customer?.email === "string" ? body.customer.email.trim().toLowerCase() : "";
+    const r = await rpc("privacy_redact_customer", { p_platform: "shopify", p_shop: shopDomain,
+      p_email_hash: email.includes("@") ? await sha256Hex(email) : null,
+      p_order_ids: (Array.isArray(body?.orders_to_redact) ? body.orders_to_redact : []).map((x: unknown) => String(x)).filter((x: string) => /^\d{1,20}$/.test(x)) });
+    if (r.error) return { status: 500, body: { error: "temporary_error" } };
+    return { status: 200, body: { ok: true, ...(r.data ?? {}) } };
+  }
+  if (topic === "shop/redact") {
+    const r = await rpc("privacy_redact_shop", { p_platform: "shopify", p_shop: shopDomain });
+    if (r.error) return { status: 500, body: { error: "temporary_error" } };
+    return { status: 200, body: { ok: true, ...(r.data ?? {}) } };
+  }
+  if (topic === "app/uninstalled") {
     const r = await rpc("app_uninstalled", { p_platform: "shopify", p_shop: shop || String(body?.shop_domain ?? "") });
     if (r.error) return { status: 500, body: { error: "temporary_error" } };
     return { status: 200, body: { ok: true, ...(r.data ?? {}) } };
@@ -752,7 +774,9 @@ export async function wixWebhook(rpc: Rpc, cfg: Config, raw: string): Promise<Re
 /** For every app connection: real API call first (a revoked or broken shop is NOT marked connected), then plugin_sync,
  *  coupons and products. One failing shop never stops the others. */
 export async function syncAll(rpc: Rpc, fetchRaw: Fetch, cfg: Config, headers: { get(k: string): string | null }): Promise<Reply> {
-  if (!cfg.cronSecret || !same(headers.get("x-linkup-cron") ?? "", cfg.cronSecret)) return { status: 401, body: { error: "unauthorized" } };
+  const given = headers.get("x-linkup-cron") ?? "";
+  const viaSecret = !!cfg.cronSecret && same(given, cfg.cronSecret);
+  if (!viaSecret && !(given && (await rpc("apps_check_cron", { p_token: given })).data === true)) return { status: 401, body: { error: "unauthorized" } };
   const fetchFn = retrying(fetchRaw, cfg.sleep); const out: Record<string, unknown>[] = [];
   for (const platform of ["shopify", "wix"] as const) {
     const ids = ([] as string[]).concat(((await rpc("app_connections", { p_platform: platform })).data ?? []) as string[] | string);

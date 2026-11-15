@@ -17,7 +17,8 @@ export async function sendLink(form: FormData) {
   // Until then only existing accounts can log in.
   // While sign-up is closed, only addresses the admin approved for testing may create a new account.
   const open = process.env.LINKUP_SIGNUPS_OPEN === "true"
-    || (await sb.rpc("signup_allowed", { p_email: email })).data === true;
+    || (await sb.rpc("signup_allowed", { p_email: email })).data === true
+    || (await invitedThrough(next));
   const { error } = await sb.auth.signInWithOtp({
     email,
     options: { shouldCreateUser: open, emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(next)}` },
@@ -39,4 +40,22 @@ export async function verifyCode(form: FormData) {
   const { error } = await sb.auth.verifyOtp({ email, token, type: "email" });
   if (error) redirect(`/login?sent=1&email=${encodeURIComponent(email)}&error=bad_code&next=${encodeURIComponent(next)}`);
   redirect(next);
+}
+
+/** Pilot: someone who opens a valid personal invitation (a partnership proposal or a team invitation) may create an
+ *  account even though public sign-up is closed. Off unless LINKUP_PILOT_INVITES=true. Only open invitations count. */
+async function invitedThrough(next: string): Promise<boolean> {
+  if (process.env.LINKUP_PILOT_INVITES !== "true") return false;
+  const sb = await getSupabase();
+  const offer = next.match(/^\/o\/([0-9a-f]{24})$/)?.[1];
+  if (offer) {
+    const { data } = await sb.rpc("get_public_proposal", { p_token: offer });
+    return !!data && ["sent", "opened"].includes((data as { status?: string }).status ?? "");
+  }
+  const team = next.match(/^\/team\/([0-9a-f]{32})$/)?.[1];
+  if (team) {
+    const { data } = await sb.rpc("get_team_invite", { p_token: team });
+    return (data as { valid?: boolean } | null)?.valid === true;
+  }
+  return false;
 }

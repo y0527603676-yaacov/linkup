@@ -9,7 +9,7 @@ export default async function Notifications({ searchParams }: { searchParams: Pr
   const n = t.notifications;
   const { data } = await sb.from("notifications").select("id, kind, payload, created_at, read_at").eq("org_id", org.id).order("created_at", { ascending: false }).limit(50);
   const detail = (p: Record<string, any>) =>
-    [p.partner, p.store, p.creator, p.name, p.title, p.opportunity, p.amount_minor != null ? money(p.amount_minor, p.currency ?? "ILS", locale) : null,
+    [p.alert ? (t.admin.alertKinds[p.alert] ?? p.alert) : null, p.org, p.detail, p.partner, p.store, p.creator, p.name, p.title, p.opportunity, p.amount_minor != null ? money(p.amount_minor, p.currency ?? "ILS", locale) : null,
      p.total_minor != null ? money(p.total_minor, p.currency ?? "ILS", locale) : null].filter(Boolean).join(" · ");
   return (
     <AppShell ctx={ctx} active="notifications" path="/app/notifications">
