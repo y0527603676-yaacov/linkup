@@ -2,6 +2,7 @@ import { AppShell, PageHead } from "@/components/AppShell";
 import { loadApp } from "@/lib/orgs";
 import { money, shortDate } from "@/lib/format";
 import { markRead } from "../actions";
+import { PushToggle } from "@/components/PushToggle";
 
 export default async function Notifications({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const ctx = await loadApp(await searchParams);
@@ -16,6 +17,7 @@ export default async function Notifications({ searchParams }: { searchParams: Pr
       <PageHead title={n.title}>
         {status.unread > 0 && <form action={markRead}><input type="hidden" name="org" value={org.id} /><button className="btn btn-ghost btn-sm">{n.markRead}</button></form>}
       </PageHead>
+      <PushToggle copy={n.push} />
       {(data ?? []).length === 0 ? <p className="empty">{n.empty}</p> : (
         <div className="list">
           {(data ?? []).map((x) => (

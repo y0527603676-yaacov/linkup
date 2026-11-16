@@ -1,6 +1,6 @@
 import type { MetadataRoute } from "next";
 
-/** Installable app: opens straight to the user's dashboard. No service worker and no offline cache, so no data is stored on the device. */
+/** Installable app: opens straight to the user's dashboard. The service worker (/sw.js) only shows sale alerts the user turned on; no offline cache. */
 export default function manifest(): MetadataRoute.Manifest {
   return {
     id: "/app",

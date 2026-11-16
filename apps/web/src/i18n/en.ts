@@ -468,6 +468,14 @@ export const en: Dict = {
   },
   settings: { title: "Settings", name: "Name", website: "Website", description: "Description", logo: "Logo URL (https)", locale: "Language", saved: "Changes saved" },
   notifications: {
+    push: {
+      title: "An alert for every sale", lead: "Want to know the moment a sale comes in? Turn on alerts on this device.",
+      enable: "Turn on alerts", enabling: "Turning on…", on: "Great! You'll get an alert for every sale on this device.", off: "Alerts are off on this device.",
+      disable: "Turn off", blocked: "Alerts are blocked in the browser. Allow them in the site settings (the lock next to the address) and come back.",
+      iosInstall: "On iPhone and iPad, alerts work after adding LINKUP to the Home Screen: Share → \"Add to Home Screen\", then open it from there.",
+      unsupported: "This browser doesn't support alerts. Try Chrome or the Home Screen app.", failed: "Couldn't turn on. Try again.",
+      note: "The alert shows the partner or store name and the amount. You can turn it off anytime.",
+    },
     title: "Updates", empty: "No new updates.", markRead: "Mark all as read",
     kinds: {
       sale_claim_opened: "A creator opened a sale inquiry", sale_claim_answered: "The store answered a sale inquiry",

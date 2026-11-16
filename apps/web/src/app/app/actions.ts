@@ -567,3 +567,15 @@ export async function startAppInstall(form: FormData) {
   }
   redirect(`https://www.wix.com/installer/install?${new URLSearchParams({ appId: process.env.WIX_APP_ID ?? "", redirectUrl: `${fnBase}/wix/callback`, state: String(data) })}`);
 }
+
+/* ---------- Push notifications (sales) ---------- */
+export async function savePushSubscription(sub: { endpoint: string; p256dh: string; auth: string }, userAgent: string) {
+  const sb = await getSupabase();
+  const { error } = await sb.rpc("push_subscribe", { p_endpoint: sub.endpoint, p_p256dh: sub.p256dh, p_auth: sub.auth, p_user_agent: userAgent.slice(0, 300) });
+  return { ok: !error, error: error ? errorCode(error) : null };
+}
+export async function removePushSubscription(endpoint: string) {
+  const sb = await getSupabase();
+  const { error } = await sb.rpc("push_unsubscribe", { p_endpoint: endpoint });
+  return { ok: !error };
+}

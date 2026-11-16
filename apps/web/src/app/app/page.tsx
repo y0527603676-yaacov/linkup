@@ -2,6 +2,7 @@ import { AppShell, NextAction, PageHead, Stat, Alert } from "@/components/AppShe
 import { loadApp, type OrgStatus } from "@/lib/orgs";
 import { date, money, pct, shortDate } from "@/lib/format";
 import type { Dict } from "@/i18n/he";
+import { PushToggle } from "@/components/PushToggle";
 
 type Sale = { external_order_id?: string; order_created_at: string; status?: string; partner?: string; store_name?: string; method: string;
   self_referral_suspected?: boolean; base_minor?: number; commission_minor: number };
@@ -46,6 +47,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
         lead={org.type === "store" ? [org.name, d.founders_until ? t.dash.founders(date(d.founders_until, locale)) : ""].filter(Boolean).join(" · ") : undefined} />
       {sp.accepted && <Alert kind="ok" text={t.dash.accepted} />}
       {next && <NextAction eyebrow={t.next.title} title={next.t} text={next.d} cta={next.cta} href={next.href} />}
+      <PushToggle copy={t.notifications.push} compact />
 
       {status.sales > 0 && (org.type === "store" || status.is_admin) && hasMoney && (
         <section className="section stats">
