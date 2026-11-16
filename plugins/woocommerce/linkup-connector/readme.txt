@@ -1,5 +1,5 @@
 === LINKUP Connector ===
-Contributors: linkup
+Contributors: linkupapp
 Tags: affiliate, influencer, coupons, referral, woocommerce
 Requires at least: 6.4
 Tested up to: 7.1
