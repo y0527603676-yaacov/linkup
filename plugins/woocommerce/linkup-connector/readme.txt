@@ -2,10 +2,10 @@
 Contributors: linkup
 Tags: affiliate, influencer, coupons, referral, woocommerce
 Requires at least: 6.4
-Tested up to: 6.5
+Tested up to: 7.1
 Requires PHP: 7.4
 WC requires at least: 8.0
-WC tested up to: 9.4
+WC tested up to: 11.0
 Stable tag: 0.4.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -86,7 +86,7 @@ See "External service" above. No customer names, addresses, phone numbers or pay
 * The plugin stops by itself when the store disconnects in LINKUP.
 * Partner coupons go to draft on disconnect or uninstall.
 * Uninstall removes the plugin's settings.
-* Translatable interface (English, Hebrew included).
+* Translation-ready interface.
 
 = 0.4.0 =
 * Remote setup routes for one-approval onboarding (store managers only; the key is never returned).
