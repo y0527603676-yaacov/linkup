@@ -50,7 +50,8 @@ export async function loadApp(sp: Record<string, string | string[] | undefined>,
     sb.rpc("org_status", { p_org: org.id }),
     sb.rpc("is_platform_admin"),
     sb.rpc("legal_pending", { p_context: "signup" }),
-    sb.rpc("legal_pending", { p_context: typeCtx }),
+    // Store terms are tracked per store; creator terms per person.
+    typeCtx === "store" ? sb.rpc("legal_pending_org", { p_org: org.id }) : sb.rpc("legal_pending", { p_context: typeCtx }),
   ]);
   // Existing users accept newly published documents once (and again only after a material change).
   // Store commercial terms are asked at connection time; here only for stores that are already connected.

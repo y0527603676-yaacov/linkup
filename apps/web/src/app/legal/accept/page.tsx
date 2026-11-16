@@ -23,7 +23,8 @@ export default async function AcceptLegal({ searchParams }: { searchParams: Prom
   if (!auth.user) redirect(`/login?next=${encodeURIComponent("/legal/accept")}`);
   const ctxs = (sp.ctx ?? "signup").split(",").filter((c) => ["signup", "store", "creator"].includes(c));
   const org = /^[0-9a-f-]{36}$/i.test(sp.org ?? "") ? sp.org! : "";
-  const lists = await Promise.all(ctxs.map((c) => sb.rpc("legal_pending", { p_context: c })));
+  // Store documents are pending per store (an acceptance for another store does not count).
+  const lists = await Promise.all(ctxs.map((c) => (c === "store" && org ? sb.rpc("legal_pending_org", { p_org: org }) : sb.rpc("legal_pending", { p_context: c }))));
   const seen = new Set<string>();
   const docs = lists.flatMap((r) => (r.data ?? []) as PendingDoc[]).filter((d) => (seen.has(d.doc_key) ? false : (seen.add(d.doc_key), true)));
   if (!docs.length) redirect(next);

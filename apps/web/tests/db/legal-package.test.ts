@@ -101,6 +101,15 @@ describe("legal documents v1.0", () => {
     conn.S = (await q(`select id from store_connections where org_id = $1 and status <> 'revoked' order by created_at desc limit 1`, [org.S]))[0].id;
     await rpc(svc, "plugin_sync", { p_connection: conn.S, p_plugin_version: "0.3.1" });
   });
+  it("store terms are pending per store: accepting for one store does not cover another", async () => {
+    expect(await rpc(u.s!, "legal_pending_org", { p_org: org.S })).toEqual([]);
+    const other = await rpc(u.s!, "create_organization", { p_type: "store", p_name: "Second shop" });
+    expect((await rpc(u.s!, "legal_pending_org", { p_org: other })).map((d: any) => d.doc_key).sort()).toEqual(["commissions", "store-terms"]);
+    expect(await rpc(u.s!, "legal_pending", { p_context: "store" })).toEqual([]);   // the person-level view is already satisfied
+    expect(await rpc(u.c!, "legal_pending_org", { p_org: other })).toEqual([]);    // not an admin of that store
+    await rpc(u.s!, "accept_legal", { p_doc_keys: ["store-terms", "commissions"], p_type: "existing_user", p_org: other, p_locale: "he" });
+    expect(await rpc(u.s!, "legal_pending_org", { p_org: other })).toEqual([]);
+  });
 });
 
 describe("rate increase without acceptance → orderly wind-down", () => {
