@@ -22,8 +22,10 @@ export async function GET(req: NextRequest) {
   const sb = await getSupabase();
   const { data: chk, error: ce } = await sb.rpc("wp_connect_check", { p_state: state });
   if (ce) return done({ error: errorCode(ce) });
-  const c = chk as { org_id: string; site_url: string; completed: boolean; expired: boolean };
-  if (c.completed) return done({ error: "invalid_state" });
+  const c = chk as { org_id: string; site_url: string; completed: boolean; expired: boolean; outcome: string | null };
+  // The browser may open the return link twice (reload, back, prefetch). The first visit already finished the setup:
+  // show its result again instead of an error.
+  if (c.completed) return done(c.outcome === "connected" ? { wp: "connected" } : { error: "invalid_state" });
   const finish = (outcome: string, details: Record<string, unknown>) =>
     sb.rpc("wp_connect_finish", { p_state: state, p_outcome: outcome, p_details: details });
 
