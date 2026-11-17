@@ -3,6 +3,8 @@ import { loadApp, type OrgStatus } from "@/lib/orgs";
 import { date, money, pct, shortDate } from "@/lib/format";
 import type { Dict } from "@/i18n/he";
 import { PushToggle } from "@/components/PushToggle";
+import { Moment } from "@/components/Moment";
+import { Suspense } from "react";
 
 type Sale = { external_order_id?: string; order_created_at: string; status?: string; partner?: string; store_name?: string; method: string;
   self_referral_suspected?: boolean; base_minor?: number; commission_minor: number };
@@ -35,6 +37,9 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
   const { data } = await sb.rpc("org_dashboard", { p_org: org.id });
   const d = (data ?? {}) as Record<string, any>;
   const next = nextFor(status, t, q);
+  // The first sale is a big moment: celebrate it once per device while its notification is still unread.
+  const { data: fs } = await sb.from("notifications").select("id").eq("org_id", org.id).eq("kind", "first_sale").is("read_at", null).limit(1);
+  const firstSale = (fs ?? []).length > 0;
   const sales = (d.recent_sales ?? []) as Sale[];
   const cur = d.currency ?? "ILS";
   // Never show a row of zeros: stats appear once there is real money to show.
@@ -48,6 +53,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
       {sp.accepted && <Alert kind="ok" text={t.dash.accepted} />}
       {next && <NextAction eyebrow={t.next.title} title={next.t} text={next.d} cta={next.cta} href={next.href} />}
       <PushToggle copy={t.notifications.push} compact />
+      {firstSale && <Suspense fallback={null}><Moment copy={t.moments} org={org.id} isStore={org.type === "store"} force="first_sale" onceKey={`lk-first-sale-${org.id}`} /></Suspense>}
 
       {status.sales > 0 && (org.type === "store" || status.is_admin) && hasMoney && (
         <section className="section stats">

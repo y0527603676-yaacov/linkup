@@ -6,8 +6,9 @@ export function CopyButton({ text, label, done = "✓", className = "btn btn-gho
 }) {
   const [ok, setOk] = useState(false);
   return (
-    <button type="button" className={className} onClick={async () => {
+    <button type="button" className={`${className}${ok ? " is-done" : ""}`} aria-live="polite" onClick={async () => {
       try { await navigator.clipboard.writeText(text); } catch { window.prompt("", text); }
+      try { navigator.vibrate?.(15); } catch { /* not supported */ }
       setOk(true); onCopied?.(); setTimeout(() => setOk(false), 1800);
     }}>{ok ? done : label}</button>
   );

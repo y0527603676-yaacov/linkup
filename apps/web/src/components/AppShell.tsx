@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { InstallPrompt } from "./InstallPrompt";
+import { Moment } from "./Moment";
+import { Suspense } from "react";
 import type { ReactNode } from "react";
 import type { Dict } from "@/i18n/he";
 import type { Org, OrgStatus } from "@/lib/orgs";
@@ -63,7 +65,7 @@ export function AppShell({ ctx, active, children, path }: { ctx: Ctx; active: Na
             </Link>
           </div>
         </header>
-        <main className="app-page"><InstallPrompt copy={t.install} />{children}</main>
+        <main className="app-page"><InstallPrompt copy={t.install} />{children}<Suspense fallback={null}><Moment copy={t.moments} org={org.id} isStore={isStore} /></Suspense></main>
       </div>
       <nav className="bottom-nav" aria-label="app-mobile">
         {bottom.filter(visible).map((k) => (

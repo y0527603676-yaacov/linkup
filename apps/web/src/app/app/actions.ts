@@ -36,7 +36,7 @@ export async function createOrg(form: FormData) {
   if (error) redirect(`/app/new?error=${errorCode(error)}&type=${encodeURIComponent(type)}&next=${encodeURIComponent(next)}`);
   if (ref) (await cookies()).delete("lk_ref");
   if (next) redirect(safeNext(next));
-  redirect(type === "store" ? `/app/connect?org=${data}` : `/app/catalog?org=${data}&welcome=1`);
+  redirect(type === "store" ? `/app/connect?org=${data}&m=store_created` : `/app/catalog?org=${data}&welcome=1`);
 }
 
 export async function updateOrg(form: FormData) {
@@ -46,7 +46,7 @@ export async function updateOrg(form: FormData) {
     p_org: org, p_name: str(form, "name"), p_website_url: str(form, "website") || null,
     p_description: str(form, "description") || null, p_logo_url: str(form, "logo") || null, p_locale: str(form, "locale") || null,
   });
-  redirect(back("/app/settings", org, error ? { error: errorCode(error) } : { ok: "1" }));
+  redirect(back("/app/settings", org, error ? { error: errorCode(error) } : { ok: "1", m: "saved" }));
 }
 
 /* ---------- Store connection ---------- */
@@ -249,16 +249,18 @@ export async function joinOpportunity(form: FormData) {
 export async function decideApplication(form: FormData) {
   const org = str(form, "org");
   const sb = await getSupabase();
-  const { error } = await sb.rpc("decide_application", { p_application: str(form, "id"), p_approve: str(form, "approve") === "1" });
-  redirect(back("/app/partners", org, error ? { error: errorCode(error) } : {}));
+  const approve = str(form, "approve") === "1";
+  const { error } = await sb.rpc("decide_application", { p_application: str(form, "id"), p_approve: approve });
+  redirect(back("/app/partners", org, error ? { error: errorCode(error) } : approve ? { m: "approved" } : {}));
 }
 
 /* ---------- Payments ---------- */
 export async function respondPayout(form: FormData) {
   const org = str(form, "org");
   const sb = await getSupabase();
-  const { error } = await sb.rpc("respond_creator_payout", { p_payout: str(form, "id"), p_confirm: str(form, "confirm") === "1", p_reason: str(form, "reason") || null });
-  redirect(back("/app/money", org, error ? { error: errorCode(error) } : { ok: "1" }));
+  const confirm = str(form, "confirm") === "1";
+  const { error } = await sb.rpc("respond_creator_payout", { p_payout: str(form, "id"), p_confirm: confirm, p_reason: str(form, "reason") || null });
+  redirect(back("/app/money", org, error ? { error: errorCode(error) } : confirm ? { ok: "1", m: "payout_confirmed" } : { ok: "1" }));
 }
 
 export async function answerDispute(form: FormData) {
